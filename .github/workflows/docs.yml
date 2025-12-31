@@ -1,0 +1,74 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  generate-docs:
+    name: Generate Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install PlatyPS
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PlatyPS -Force -Scope CurrentUser
+
+      - name: Generate Documentation
+        shell: pwsh
+        run: |
+          Import-Module ./src/ADScout/ADScout.psd1 -Force
+
+          # Create docs directory if needed
+          $docsPath = "./docs"
+          if (-not (Test-Path $docsPath)) {
+              New-Item -Path $docsPath -ItemType Directory -Force
+          }
+
+          # Generate markdown help
+          Import-Module PlatyPS
+          New-MarkdownHelp -Module ADScout -OutputFolder $docsPath -Force -NoMetadata
+
+          # Generate README for docs
+          $commands = Get-Command -Module ADScout
+          $toc = $commands | ForEach-Object { "- [$($_.Name)]($($_.Name).md)" }
+
+          $readme = @"
+          # AD-Scout Documentation
+
+          Auto-generated documentation for AD-Scout cmdlets.
+
+          ## Commands
+
+          $($toc -join "`n")
+
+          ## Getting Started
+
+          See the main [README](../README.md) for installation and quick start.
+
+          ## Contributing
+
+          See [CONTRIBUTING](../CONTRIBUTING.md) for how to add new rules and features.
+          "@
+
+          $readme | Out-File "$docsPath/README.md" -Encoding UTF8
+
+          Write-Host "Documentation generated in $docsPath"
+          Get-ChildItem $docsPath
+
+      - name: Commit Documentation
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/
+          git diff --quiet && git diff --staged --quiet || git commit -m "docs: auto-generate documentation [skip ci]"
+          git push

@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: PSScriptAnalyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./src -Recurse -Settings ./.psscriptanalyzerrc -Severity Error,Warning
+          if ($results) {
+              $results | Format-Table -AutoSize
+              throw "PSScriptAnalyzer found $($results.Count) issues"
+          }
+          Write-Host "PSScriptAnalyzer: No issues found" -ForegroundColor Green
+
+  test:
+    name: Pester Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            shell: pwsh
+          - os: ubuntu-latest
+            shell: pwsh
+          - os: macos-latest
+            shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: ${{ matrix.shell }}
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser
+
+      - name: Run Pester Tests
+        shell: ${{ matrix.shell }}
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = "./tests"
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = "Detailed"
+          $config.CodeCoverage.Enabled = $true
+          $config.CodeCoverage.Path = "./src"
+          $config.CodeCoverage.OutputPath = "./coverage.xml"
+          $config.CodeCoverage.OutputFormat = "CoverageGutters"
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "./testResults.xml"
+          $config.TestResult.OutputFormat = "NUnitXml"
+
+          Invoke-Pester -Configuration $config
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            ./testResults.xml
+            ./coverage.xml
+
+  module-load:
+    name: Module Load Test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test Module Import
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Import module
+          Import-Module ./src/ADScout/ADScout.psd1 -Force -Verbose
+
+          # Verify module is loaded
+          $module = Get-Module ADScout
+          if (-not $module) {
+              throw "Module failed to load"
+          }
+
+          Write-Host "Module loaded successfully: $($module.Name) v$($module.Version)"
+
+          # List exported commands
+          $commands = Get-Command -Module ADScout
+          Write-Host "Exported commands: $($commands.Count)"
+          $commands | Format-Table Name, CommandType
+
+          # Verify expected commands exist
+          $expectedCommands = @(
+              'Invoke-ADScoutScan'
+              'Get-ADScoutRule'
+              'Export-ADScoutReport'
+              'New-ADScoutRule'
+              'Register-ADScoutRule'
+              'Get-ADScoutRemediation'
+              'Set-ADScoutConfig'
+              'Get-ADScoutConfig'
+              'Show-ADScoutDashboard'
+          )
+
+          foreach ($cmd in $expectedCommands) {
+              if ($cmd -notin $commands.Name) {
+                  throw "Expected command not exported: $cmd"
+              }
+          }
+
+          Write-Host "All expected commands are exported" -ForegroundColor Green

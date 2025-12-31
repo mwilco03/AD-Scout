@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/mwilco03/AD-Scout/schemas/rule.schema.json",
+  "title": "AD-Scout Rule Schema",
+  "description": "Schema for AD-Scout security assessment rules",
+  "type": "object",
+  "required": [
+    "Id",
+    "Name",
+    "Category",
+    "ScriptBlock",
+    "Description"
+  ],
+  "properties": {
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Z]-[A-Za-z0-9-]+$",
+      "description": "Unique rule identifier (format: X-RuleName where X is category prefix)"
+    },
+    "Name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 100,
+      "description": "Human-readable rule name"
+    },
+    "Category": {
+      "type": "string",
+      "enum": ["Anomalies", "StaleObjects", "PrivilegedAccounts", "Trusts"],
+      "description": "Rule category"
+    },
+    "Model": {
+      "type": "string",
+      "description": "Subcategory or model type"
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Rule version (semver format)"
+    },
+    "Computation": {
+      "type": "string",
+      "enum": ["TriggerOnPresence", "PerDiscover", "TriggerOnThreshold", "TriggerIfLessThan"],
+      "default": "PerDiscover",
+      "description": "Scoring computation method"
+    },
+    "Points": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 1,
+      "description": "Points per finding or total points"
+    },
+    "MaxPoints": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 100,
+      "description": "Maximum cumulative points"
+    },
+    "Threshold": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Threshold for threshold-based computation"
+    },
+    "MITRE": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^T\\d{4}(\\.\\d{3})?$"
+      },
+      "description": "MITRE ATT&CK technique IDs"
+    },
+    "CIS": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CIS Control IDs"
+    },
+    "STIG": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^V-\\d+$"
+      },
+      "description": "STIG IDs"
+    },
+    "ANSSI": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "ANSSI recommendation IDs"
+    },
+    "ScriptBlock": {
+      "type": "string",
+      "description": "PowerShell scriptblock that performs the check (as string for JSON)"
+    },
+    "DetailProperties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Properties to include in finding details"
+    },
+    "DetailFormat": {
+      "type": "string",
+      "description": "Format string for finding display"
+    },
+    "Remediation": {
+      "type": "string",
+      "description": "PowerShell scriptblock for remediation (as string for JSON)"
+    },
+    "Description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500,
+      "description": "Brief description for reports"
+    },
+    "TechnicalExplanation": {
+      "type": "string",
+      "description": "Detailed technical explanation"
+    },
+    "References": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "description": "Reference URLs"
+    },
+    "Prerequisites": {
+      "type": "string",
+      "description": "PowerShell scriptblock for prerequisites check (as string for JSON)"
+    },
+    "AppliesTo": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["OnPremises", "Hybrid", "CloudOnly"]
+      },
+      "description": "Environment types this rule applies to"
+    }
+  },
+  "additionalProperties": false
+}
