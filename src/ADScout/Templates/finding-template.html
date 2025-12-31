@@ -1,0 +1,98 @@
+<div class="finding-card {{SeverityClass}}" data-severity="{{Severity}}" data-category="{{Category}}">
+    <div class="finding-header">
+        <div class="finding-title">
+            <span class="severity-badge {{SeverityClass}}">{{Severity}}</span>
+            <span class="rule-id">{{RuleId}}</span>
+            <h3>{{Title}}</h3>
+        </div>
+        <div class="finding-meta">
+            <span class="category-tag">{{Category}}</span>
+            <span class="score">Score: {{Score}}/{{MaxScore}}</span>
+            <span class="affected-count">{{AffectedCount}} affected</span>
+            <span class="expand-icon">&#9660;</span>
+        </div>
+    </div>
+
+    <div class="finding-body">
+        <div class="finding-description">
+            <h4>Description</h4>
+            <p>{{Description}}</p>
+        </div>
+
+        <div class="finding-impact">
+            <h4>Security Impact</h4>
+            <p>{{Impact}}</p>
+        </div>
+
+        <div class="affected-objects">
+            <h4>Affected Objects ({{AffectedCount}})</h4>
+            <div class="objects-table-container">
+                <table class="objects-table">
+                    <thead>
+                        <tr>{{AffectedHeaders}}</tr>
+                    </thead>
+                    <tbody>
+                        {{AffectedRows}}
+                    </tbody>
+                </table>
+                {{ShowMoreLink}}
+            </div>
+        </div>
+
+        <div class="remediation">
+            <h4>Remediation</h4>
+            <div class="remediation-description">
+                <p>{{RemediationDescription}}</p>
+            </div>
+            {{#if RemediationScript}}
+            <div class="remediation-script">
+                <h5>PowerShell Remediation Script</h5>
+                <div class="script-warning">
+                    <strong>Warning:</strong> Review and test this script in a non-production environment before execution.
+                </div>
+                <pre><code class="language-powershell">{{RemediationScript}}</code></pre>
+                <button class="copy-btn" onclick="copyToClipboard(this)">Copy Script</button>
+            </div>
+            {{/if}}
+        </div>
+
+        <div class="framework-mappings">
+            <h4>Framework Mappings</h4>
+            <div class="mapping-tags">
+                {{#if MITRE}}
+                <div class="mapping-group">
+                    <span class="mapping-label">MITRE ATT&CK:</span>
+                    {{#each MITRE}}
+                    <a href="https://attack.mitre.org/techniques/{{this}}/" target="_blank" class="mapping-tag mitre">{{this}}</a>
+                    {{/each}}
+                </div>
+                {{/if}}
+                {{#if CIS}}
+                <div class="mapping-group">
+                    <span class="mapping-label">CIS Control:</span>
+                    {{#each CIS}}
+                    <span class="mapping-tag cis">{{this}}</span>
+                    {{/each}}
+                </div>
+                {{/if}}
+                {{#if STIG}}
+                <div class="mapping-group">
+                    <span class="mapping-label">STIG:</span>
+                    {{#each STIG}}
+                    <span class="mapping-tag stig">{{this}}</span>
+                    {{/each}}
+                </div>
+                {{/if}}
+            </div>
+        </div>
+
+        <div class="references">
+            <h4>References</h4>
+            <ul class="reference-list">
+                {{#each References}}
+                <li><a href="{{this.Url}}" target="_blank">{{this.Title}}</a></li>
+                {{/each}}
+            </ul>
+        </div>
+    </div>
+</div>

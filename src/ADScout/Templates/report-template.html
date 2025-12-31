@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AD-Scout Security Assessment Report - {{Domain}}</title>
+    <style>
+        {{Styles}}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="report-header">
+            <div class="logo">
+                <h1>AD-Scout</h1>
+                <span class="tagline">Active Directory Security Assessment</span>
+            </div>
+            <div class="report-meta">
+                <div class="meta-item">
+                    <span class="label">Domain:</span>
+                    <span class="value">{{Domain}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="label">Scan Date:</span>
+                    <span class="value">{{ScanDate}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="label">Report Generated:</span>
+                    <span class="value">{{GeneratedDate}}</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="executive-summary">
+            <h2>Executive Summary</h2>
+            <div class="score-overview">
+                <div class="overall-score {{ScoreClass}}">
+                    <div class="score-value">{{OverallScore}}</div>
+                    <div class="score-label">Security Score</div>
+                    <div class="score-grade">{{ScoreGrade}}</div>
+                </div>
+                <div class="score-breakdown">
+                    <div class="breakdown-item critical">
+                        <span class="count">{{CriticalCount}}</span>
+                        <span class="label">Critical</span>
+                    </div>
+                    <div class="breakdown-item high">
+                        <span class="count">{{HighCount}}</span>
+                        <span class="label">High</span>
+                    </div>
+                    <div class="breakdown-item medium">
+                        <span class="count">{{MediumCount}}</span>
+                        <span class="label">Medium</span>
+                    </div>
+                    <div class="breakdown-item low">
+                        <span class="count">{{LowCount}}</span>
+                        <span class="label">Low</span>
+                    </div>
+                    <div class="breakdown-item info">
+                        <span class="count">{{InfoCount}}</span>
+                        <span class="label">Info</span>
+                    </div>
+                </div>
+            </div>
+            <div class="summary-text">
+                <p>{{SummaryText}}</p>
+            </div>
+        </section>
+
+        <section class="category-scores">
+            <h2>Category Breakdown</h2>
+            <div class="category-grid">
+                {{CategoryScores}}
+            </div>
+        </section>
+
+        <section class="findings">
+            <h2>Detailed Findings</h2>
+            <div class="filter-controls">
+                <button class="filter-btn active" data-severity="all">All</button>
+                <button class="filter-btn" data-severity="critical">Critical</button>
+                <button class="filter-btn" data-severity="high">High</button>
+                <button class="filter-btn" data-severity="medium">Medium</button>
+                <button class="filter-btn" data-severity="low">Low</button>
+            </div>
+            <div class="findings-list">
+                {{Findings}}
+            </div>
+        </section>
+
+        <section class="recommendations">
+            <h2>Priority Remediation Steps</h2>
+            <ol class="remediation-list">
+                {{RemediationSteps}}
+            </ol>
+        </section>
+
+        <section class="appendix">
+            <h2>Appendix</h2>
+            <div class="scan-details">
+                <h3>Scan Configuration</h3>
+                <table class="config-table">
+                    <tr><td>Rules Evaluated</td><td>{{RulesCount}}</td></tr>
+                    <tr><td>Scan Duration</td><td>{{ScanDuration}}</td></tr>
+                    <tr><td>AD-Scout Version</td><td>{{Version}}</td></tr>
+                    <tr><td>PowerShell Version</td><td>{{PSVersion}}</td></tr>
+                </table>
+            </div>
+            <div class="framework-mappings">
+                <h3>Framework Coverage</h3>
+                <p>This assessment includes mappings to:</p>
+                <ul>
+                    <li>MITRE ATT&CK for Enterprise</li>
+                    <li>CIS Microsoft Windows Server Benchmarks</li>
+                    <li>DISA STIGs for Active Directory</li>
+                    <li>ANSSI Active Directory Security Guidelines</li>
+                </ul>
+            </div>
+        </section>
+
+        <footer class="report-footer">
+            <p>Generated by <a href="https://github.com/mwilco03/AD-Scout">AD-Scout</a> - Open Source AD Security Assessment</p>
+            <p class="disclaimer">This report is provided for informational purposes. Always validate findings before making changes to production environments.</p>
+        </footer>
+    </div>
+
+    <script>
+        // Filter functionality
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const severity = this.dataset.severity;
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+
+                document.querySelectorAll('.finding-card').forEach(card => {
+                    if (severity === 'all' || card.dataset.severity === severity) {
+                        card.style.display = 'block';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+            });
+        });
+
+        // Collapsible sections
+        document.querySelectorAll('.finding-header').forEach(header => {
+            header.addEventListener('click', function() {
+                const card = this.closest('.finding-card');
+                card.classList.toggle('expanded');
+            });
+        });
+    </script>
+</body>
+</html>
