@@ -1,207 +1,469 @@
-# AD-Scout Design Document
+# ADScout: PowerShell-Native Active Directory Security Assessment Framework
+
+## Design Document v0.1
 
 > **Status**: STATIC - This document defines the vision and philosophy of AD-Scout. Changes require maintainer approval.
 
-## Vision
+---
 
-AD-Scout is a PowerShell-native Active Directory security assessment framework that empowers security professionals and system administrators to identify, understand, and remediate security weaknesses in their Active Directory environments.
+## Executive Summary
 
-## Mission
+**ADScout** is a PowerShell-native Active Directory security assessment framework designed from the ground up for the modern administrator, security professional, and DevOps engineer. While standing on the shoulders of giants like PingCastle, BloodHound, and ADRecon, ADScout is a wholly distinct project with different goals, architecture, and philosophy.
 
-To provide an open-source, extensible, and accessible tool for Active Directory security assessment that:
+**Core Philosophy:** *"If it can be done in PowerShell, it should be done in PowerShell."*
 
-1. Works seamlessly within existing PowerShell workflows
-2. Enables community contribution without barriers
-3. Provides actionable remediation guidance
-4. Maps findings to industry security frameworks
+---
 
-## Core Principles
+## 1. Vision & Objectives
 
-### 1. PowerShell-First
+### What We Are Aiming to Accomplish
 
-AD-Scout is not a compiled binary with a PowerShell wrapper. It is a native PowerShell module that:
+1. **Democratize AD Security Assessment** - Make professional-grade AD security auditing accessible to every organization, regardless of budget or expertise level.
 
-- Uses native cmdlets before CIM, CIM before WMI, WMI before .NET
-- Supports the PowerShell pipeline for composability
-- Provides tab-completion for discoverability
-- Works with `Show-Command` for GUI interaction
-- Integrates with PowerShell's help system
+2. **PowerShell-Native Experience** - First-class PowerShell citizen with tab-completion, pipeline support, `Show-Command` integration, and idiomatic PowerShell patterns.
 
-**Rationale**: PowerShell is the native management language for Windows environments. A PowerShell-first approach ensures natural integration with existing tools and workflows.
+3. **Community-Driven Extensibility** - Lower the barrier for security professionals to contribute rules, scanners, and reports without requiring C# compilation or complex toolchains.
 
-### 2. Community-Extensible
+4. **Cross-Version Compatibility** - Deterministic behavior across PowerShell 5.1 (Windows) and 7.x (cross-platform).
 
-Anyone can contribute rules without:
+5. **Transparency & Education** - Not just "you have a problem" but "here's why it's a problem, here's the attack path, and here's exactly how to fix it."
 
-- Compiling code
-- Understanding complex architectures
-- Signing binaries
-- Waiting for releases
+---
 
-Rules are PowerShell hashtables in `.ps1` files that can be:
-- Dropped into the module's Rules directory
-- Loaded from custom paths
-- Shared as single files
+## 2. Differentiation: Why ADScout?
 
-**Rationale**: Security knowledge should be shareable. Lowering the barrier to contribution increases the collective security of all users.
+### How ADScout Differs from PingCastle
 
-### 3. Cross-Version Compatible
+| Aspect | PingCastle | ADScout |
+|--------|------------|---------|
+| **Language** | C# compiled executable | PowerShell-native module |
+| **Rule Creation** | Requires C# knowledge, recompilation | Drop-in `.ps1` files with scriptblocks |
+| **Extensibility** | Modify source, rebuild | `Register-ADScoutRule` at runtime |
+| **Integration** | Standalone tool | Pipeline-native, CI/CD ready |
+| **Reporting** | Embedded HTML generation | Pluggable reporters (HTML, JSON, CSV, Dashboard) |
+| **AV Detection** | Often flagged (15+ vendors) | Scripts rarely flagged |
+| **Learning Curve** | Run executable, read report | Interactive exploration, `Get-Help` everywhere |
+| **Customization** | Configuration files | PowerShell parameter sets, splatting |
+| **Community Rules** | Pull requests to main repo | Local rule directories, community galleries |
 
-AD-Scout works on:
+### How ADScout Differs from BloodHound
 
-- Windows PowerShell 5.1 (most enterprise environments)
-- PowerShell 7.x (modern environments)
-- Desktop and Core editions
+| Aspect | BloodHound | ADScout |
+|--------|------------|---------|
+| **Focus** | Attack path analysis (graph) | Security posture assessment (score) |
+| **Output** | Neo4j database, web UI | PowerShell objects, exportable reports |
+| **Use Case** | Red team, penetration testing | Blue team, compliance, continuous monitoring |
+| **Dependencies** | Neo4j, SharpHound binary | PowerShell only (optional .NET libs) |
+| **Complementary** | Yes - different focus areas | Can feed data TO BloodHound |
 
-When version-specific features are available, AD-Scout uses them for performance (e.g., `ForEach-Object -Parallel`), but always falls back gracefully.
+### How ADScout Differs from ADRecon
 
-**Rationale**: Enterprise environments cannot always run the latest software. AD-Scout meets administrators where they are.
+| Aspect | ADRecon | ADScout |
+|--------|---------|---------|
+| **Focus** | Data collection & inventory | Security assessment & scoring |
+| **Output** | Excel spreadsheets | Scored findings with remediation |
+| **Rules** | Implicit in code | Explicit, declarative, extensible |
+| **Scoring** | None | Risk-based scoring system |
 
-### 4. Output-Flexible
+---
 
-Results are data, not presentation. AD-Scout separates:
+## 3. Key Features
 
-- **Collection**: Gathering AD data
-- **Analysis**: Evaluating rules against data
-- **Reporting**: Presenting findings
+### 3.1 Rule Generator Architecture
 
-Reporters are pluggable modules that can output to:
-- Console (human-readable)
-- HTML (management reporting)
-- JSON (automation and SIEM)
-- CSV (spreadsheet analysis)
-- SARIF (DevSecOps integration)
-- Custom formats (webhooks, databases, etc.)
+The heart of ADScout is its **scriptblock-based rule system**:
 
-**Rationale**: Different stakeholders need different outputs. A CISO needs an executive summary; a SOC needs SIEM-ingestible data; an admin needs actionable commands.
+```powershell
+# Defining a rule is as simple as writing a scriptblock
+New-ADScoutRule -Id "S-PwdNeverExpires" -Category "StaleObjects" -ScriptBlock {
+    param($ADData)
 
-### 5. Framework-Mapped
+    # Return objects that violate the rule
+    $ADData.Users | Where-Object {
+        $_.PasswordNeverExpires -eq $true -and
+        $_.Enabled -eq $true
+    }
+}
 
-Every finding maps to relevant security frameworks:
-
-- **MITRE ATT&CK**: Adversary tactics and techniques
-- **CIS Controls**: Defensive security controls
-- **DISA STIG**: Government compliance requirements
-- **ANSSI**: European security guidance
-
-**Rationale**: Mapping findings to frameworks provides context, aids prioritization, and supports compliance efforts.
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      User Interface                         │
-│  (Invoke-ADScoutScan, Show-ADScoutDashboard, CLI)          │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Orchestration Layer                       │
-│  (Parallel execution, progress reporting, error handling)   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   Collectors    │ │    Analyzers    │ │   Reporters     │
-│                 │ │                 │ │                 │
-│ • Users         │ │ • Rule Engine   │ │ • Console       │
-│ • Computers     │ │ • Scoring       │ │ • HTML          │
-│ • Groups        │ │ • Categorization│ │ • JSON          │
-│ • GPOs          │ │                 │ │ • CSV           │
-│ • Trusts        │ │                 │ │ • Custom        │
-│ • Certificates  │ │                 │ │                 │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Rules                                │
-│  (PowerShell hashtables with metadata and ScriptBlocks)     │
-└─────────────────────────────────────────────────────────────┘
+# The returned objects automatically become the finding details
+# Points are calculated based on count and rule configuration
 ```
 
-## Differentiation
+#### Rule Definition Schema
 
-### vs. PingCastle
+```powershell
+@{
+    # Identity
+    Id          = "S-PwdNeverExpires"
+    Name        = "Password Never Expires"
+    Category    = "StaleObjects"        # Anomalies, StaleObjects, PrivilegedAccounts, Trusts
+    Model       = "PasswordPolicy"       # Sub-categorization
 
-- **Language**: AD-Scout is pure PowerShell; PingCastle is C#
-- **Extensibility**: AD-Scout uses drop-in rules; PingCastle requires recompilation
-- **License**: AD-Scout is MIT; PingCastle is proprietary/GPL
-- **Focus**: AD-Scout emphasizes PowerShell integration; PingCastle emphasizes standalone operation
+    # Scoring
+    Computation = "PerDiscover"          # TriggerOnPresence, PerDiscover, TriggerOnThreshold, TriggerIfLessThan
+    Points      = 1                       # Points per finding (or total for TriggerOnPresence)
+    MaxPoints   = 30                      # Cap for PerDiscover rules
 
-### vs. BloodHound
+    # Framework Mappings
+    MITRE       = @("T1078.002")         # MITRE ATT&CK technique IDs
+    ANSSI       = "R36"                   # ANSSI recommendation
+    CIS         = "5.1.2"                 # CIS Benchmark control
+    STIG        = "V-8527"                # DISA STIG finding ID
 
-- **Purpose**: AD-Scout focuses on configuration assessment; BloodHound focuses on attack path analysis
-- **Dependencies**: AD-Scout has no external dependencies; BloodHound requires Neo4j
-- **Output**: AD-Scout produces reports; BloodHound produces graphs
-- **Complementary**: Both tools serve different purposes and can be used together
+    # The Check (returns violating objects)
+    ScriptBlock = {
+        param($ADData)
+        $ADData.Users | Where-Object { $_.PasswordNeverExpires -and $_.Enabled }
+    }
 
-### vs. ADRecon
+    # Output Configuration
+    DetailProperties = @("SamAccountName", "DistinguishedName", "PasswordLastSet")
 
-- **Scope**: AD-Scout focuses on security findings; ADRecon focuses on data collection
-- **Rules**: AD-Scout has an extensible rule engine; ADRecon has hardcoded checks
-- **Framework Mapping**: AD-Scout maps to MITRE/CIS/STIG; ADRecon does not
-- **Similar**: Both are pure PowerShell with similar data collection approaches
+    # Remediation
+    Remediation = {
+        param($Finding)
+        "Set-ADUser -Identity '$($Finding.SamAccountName)' -PasswordNeverExpires `$false"
+    }
 
-## Design Decisions
+    # Documentation
+    Description = "Accounts with passwords that never expire present a persistent attack surface."
+    TechnicalExplanation = "When PasswordNeverExpires is set, compromised credentials remain valid indefinitely."
 
-### Rule Format
+    # References
+    References = @(
+        "https://docs.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/password-policy"
+        "https://attack.mitre.org/techniques/T1078/002/"
+    )
+}
+```
 
-Rules are PowerShell hashtables, not classes or DSL, because:
+### 3.2 Tab-Completion & Show-Command Integration
 
-- Hashtables are universally understood
-- No learning curve for contributors
-- Easy to validate with JSON Schema
-- No compilation or module import required
+Every command supports rich tab-completion:
 
-### Scoring Model
+```powershell
+# Tab through categories
+Invoke-ADScoutScan -Category <TAB>
+# Shows: Anomalies, StaleObjects, PrivilegedAccounts, Trusts
 
-AD-Scout uses a points-based scoring model:
+# Tab through specific rules
+Invoke-ADScoutScan -RuleId <TAB>
+# Shows: A-AuditDC, S-PwdNeverExpires, P-Kerberoasting...
 
-- Each rule assigns points for findings
-- Points accumulate up to a configurable maximum
-- Categories have separate scores
-- Overall score provides quick assessment
+# Tab through output formats
+Export-ADScoutReport -Format <TAB>
+# Shows: HTML, JSON, CSV, SARIF, Markdown, Console
 
-Computation types:
-- **TriggerOnPresence**: Fixed points if any findings exist
-- **PerDiscover**: Points per finding (most common)
-- **TriggerOnThreshold**: Points if count exceeds threshold
-- **TriggerIfLessThan**: Points if count is below threshold
+# Show-Command for discovery
+Show-Command Invoke-ADScoutScan
+# Opens GUI with all parameters, dropdowns, help text
+```
 
-### Caching Strategy
+### 3.3 Data Collection Priority
 
-AD data is cached during scans to:
+**PowerShell-First Philosophy:**
 
-- Avoid redundant AD queries
-- Enable offline analysis
-- Support incremental updates
+```
+Priority 1: Native PowerShell Cmdlets
+    Get-ADUser, Get-ADComputer, Get-ADGroup, Get-ADTrust
+    Get-ADDomain, Get-ADForest, Get-ADReplicationSite
 
-Cache TTL is configurable (default: 5 minutes).
+Priority 2: CIM/WMI (CIM preferred)
+    Get-CimInstance -ClassName Win32_OperatingSystem
+    Get-CimInstance vs Get-WmiObject (CIM preferred for PS 3+)
 
-### Error Handling
+Priority 3: .NET Framework Classes
+    [System.DirectoryServices.DirectorySearcher] for LDAP
+    [System.DirectoryServices.ActiveDirectory.*] for forest/domain
 
-AD-Scout follows these error handling principles:
+Priority 4: External Libraries (when no alternative)
+    SMBLibrary for protocol-level SMB scanning
+    Only loaded when specific scanners invoked
+```
 
-1. **Never crash on missing data**: Skip and warn
-2. **Log everything**: Verbose and Debug streams
-3. **Aggregate errors**: Report all issues, not just the first
-4. **Provide context**: Include relevant object information
+### 3.4 Cross-Version Compatibility Matrix
 
-## Future Considerations
+| Feature | PS 5.1 | PS 7.x | Notes |
+|---------|--------|--------|-------|
+| **Core Rules** | ✅ | ✅ | DirectorySearcher works everywhere |
+| **AD Cmdlets** | ✅ | ✅ | Graceful fallback to ADSI |
+| **CIM Sessions** | ✅ | ✅ | Native support |
+| **Tab Completion** | ✅ | ✅ | Full support |
+| **Classes** | ✅ | ✅ | Full support |
+| **HTML Reports** | ✅ | ✅ | ConvertTo-Html universal |
+| **Parallel Scans** | ⚠️ | ✅ | Runspaces on 5.1, ForEach-Parallel on 7 |
 
-### Attack Path Analysis
+### 3.5 Reporting System
 
-While BloodHound excels at attack paths, AD-Scout may add lightweight path analysis for common scenarios (e.g., path to Domain Admin).
+#### Pluggable Reporter Architecture
 
-### Agent Mode
+```powershell
+# Use multiple reporters
+Invoke-ADScoutScan | Export-ADScoutReport -Format HTML, JSON, Console
 
-A future agent mode could run continuous assessments and report to a central dashboard.
+# Export to different destinations
+$results | Export-ADScoutReport -Format HTML -Path "./report.html"
+$results | Export-ADScoutReport -Format JSON -Path "./results.json"
+$results | Export-ADScoutReport -Format SARIF -Path "./security.sarif"
+```
 
-### Cloud Integration
+#### Built-in Reporters
 
-Azure AD and hybrid environment support are planned for future releases.
+| Reporter | Output | Features |
+|----------|--------|----------|
+| **Console** | Terminal | Color-coded, severity indicators |
+| **HTML** | Static HTML file | Interactive tables, charts |
+| **JSON** | Structured data | CI/CD integration, API consumption |
+| **CSV** | Spreadsheet-ready | Excel import, legacy systems |
+| **SARIF** | Security standard | GitHub/Azure DevOps security tab |
+| **Markdown** | Documentation | Git-friendly, PR comments |
 
-## Conclusion
+---
 
-AD-Scout is designed to be the community's Active Directory security tool—extensible, accessible, and powerful. By prioritizing PowerShell integration and community contribution, we aim to make AD security assessment available to everyone.
+## 4. Community Requests Addressed
+
+Based on analysis of community feedback from similar tools:
+
+| Request | How ADScout Addresses It |
+|---------|-------------------------|
+| **API Access** | Native PowerShell objects - IS the API |
+| **Scheduled Scanning** | PowerShell + Task Scheduler (trivial) |
+| **AV False Positives** | Scripts don't trigger like compiled EXEs |
+| **Integration with Tools** | Pipeline-native, outputs to any format |
+| **Multi-Domain Support** | `-Domain` parameter support |
+| **Remediation Scripts** | `Get-ADScoutRemediation -RuleId X` outputs runnable scripts |
+| **Custom Rules** | First-class citizen, no recompilation |
+| **Better Error Handling** | `-ErrorAction`, try/catch, `-Verbose` |
+
+### New Features
+
+```powershell
+# 1. Differential Scanning - What changed since last scan?
+$baseline = Import-ADScoutBaseline -Path "./baseline.json"
+Invoke-ADScoutScan -Baseline $baseline | Where-Object IsNew
+
+# 2. Remediation Automation
+Get-ADScoutRemediation -RuleId "S-PwdNeverExpires" -AsScript
+
+# 3. Compliance Mapping
+Invoke-ADScoutScan | Where-Object { $_.MITRE -contains "T1078.002" }
+
+# 4. Impact Analysis
+Invoke-ADScoutScan | Select-Object RuleId, Score, FindingCount
+```
+
+---
+
+## 5. Technical Architecture
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              INVOCATION                                  │
+│  Invoke-ADScoutScan -Domain contoso.com -Category Anomalies             │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           DATA COLLECTION                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐  │
+│  │ PS Cmdlets   │  │ CIM/WMI      │  │ ADSI/LDAP    │  │ .NET Libs   │  │
+│  │ Get-ADUser   │  │ Win32_*      │  │ DirectorySvc │  │ (optional)  │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘  │
+│         └──────────────────┴─────────────────┴─────────────────┘         │
+│                                     │                                    │
+│                                     ▼                                    │
+│                          ┌──────────────────┐                            │
+│                          │   $ADData Object │  (Normalized data model)   │
+│                          └────────┬─────────┘                            │
+└───────────────────────────────────┼─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            RULE ENGINE                                   │
+│                                                                          │
+│   foreach ($Rule in Get-ADScoutRule -Category $Category) {              │
+│       $Findings = & $Rule.ScriptBlock -ADData $ADData                   │
+│       $Score = Measure-RuleScore -Findings $Findings -Rule $Rule        │
+│   }                                                                      │
+│                                                                          │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              RESULTS                                     │
+│                                                                          │
+│   [PSCustomObject]@{                                                     │
+│       Domain        = "contoso.com"                                      │
+│       ScanTime      = [datetime]                                         │
+│       GlobalScore   = 65                                                 │
+│       CategoryScores = @{ Anomalies=35; StaleObjects=45; ... }          │
+│       Rules         = @( [RuleResult], [RuleResult], ... )              │
+│   }                                                                      │
+│                                                                          │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                        ┌────────────┼────────────┐
+                        ▼            ▼            ▼
+                 ┌──────────┐ ┌──────────┐ ┌──────────┐
+                 │ Pipeline │ │  Export  │ │Dashboard │
+                 │ Output   │ │  Report  │ │  Live    │
+                 └──────────┘ └──────────┘ └──────────┘
+```
+
+---
+
+## 6. Considerations & Design Decisions
+
+### Security
+- **Credential Handling**: Never store credentials; use `Get-Credential` or Windows auth
+- **Execution Policy**: Work within user's policy, don't bypass
+- **Least Privilege**: Document minimum required permissions per scan type
+- **Output Sanitization**: Don't expose sensitive data in reports by default
+
+### Performance
+- **Lazy Loading**: Don't load optional libraries unless specific scans requested
+- **Caching**: Cache expensive queries (schema, forest info) per session
+- **Parallelization**: Configurable thread count, respect server limits
+
+### Compatibility
+- **No Breaking Changes**: Semantic versioning, deprecation warnings
+- **Fallback Chains**: Always have a way to get data, even if degraded
+
+### Usability
+- **Verbose by Default**: Progress indicators, `-Verbose` for details
+- **Fail Gracefully**: Skip unavailable data sources, continue scanning
+- **Helpful Errors**: Not just "Access Denied" but "Try running as Domain Admin"
+
+---
+
+## 7. Licensing Strategy
+
+### MIT License
+
+**Rationale:**
+
+| Factor | MIT Advantage |
+|--------|---------------|
+| **Simplicity** | One of the most permissive, easy to understand |
+| **Adoption** | Maximum adoption potential |
+| **Contribution** | No license friction for contributors |
+| **Compatibility** | Compatible with LGPL libraries we depend on |
+| **Commercial Use** | Allowed |
+| **No Copyleft** | Derivatives don't need to be open source |
+
+---
+
+## 8. Standing on the Shoulders of Giants
+
+### Acknowledgments
+
+ADScout would not be possible without the pioneering work of these projects and individuals:
+
+#### PingCastle
+**Author:** Vincent LE TOUX
+
+PingCastle established the foundational concepts of Active Directory security scoring, risk categorization, and the rule-based assessment model. Its comprehensive rule library represents years of security research and real-world assessment experience.
+
+#### BloodHound / SharpHound
+**Authors:** SpecterOps team
+
+BloodHound revolutionized understanding of Active Directory attack paths through graph theory.
+
+#### SMBLibrary
+**Author:** Tal Aloni
+
+A complete, open-source SMB implementation in C#, enabling protocol-level inspection.
+
+#### ADRecon
+**Author:** Prashant Mahajan
+
+Demonstrated the viability of comprehensive AD data collection in pure PowerShell.
+
+#### PSWriteHTML
+**Author:** Evotec
+
+Proved that beautiful, interactive HTML reports can be generated entirely from PowerShell.
+
+#### DSInternals
+**Author:** Michael Grafnetter
+
+Showed that deep AD internals can be exposed through PowerShell.
+
+---
+
+### This Is a Different Project
+
+While we deeply appreciate and acknowledge these contributions, **ADScout is an independent project** with:
+
+- **Different goals**: PowerShell-native experience over compiled performance
+- **Different architecture**: Scriptblock-based rules over C# classes
+- **Different philosophy**: Community-first, contribution-friendly design
+- **Different licensing**: MIT
+- **Different target audience**: PowerShell administrators, DevOps engineers, blue teamers
+
+We are not a fork, port, or derivative work. We are a new tool that applies lessons learned from these giants to create something that fills a different niche in the AD security ecosystem.
+
+---
+
+## 9. Roadmap
+
+### Phase 1: Foundation (MVP)
+- [x] Core module structure
+- [x] Rule engine with scriptblock support
+- [x] Essential rules (starting with S-PwdNeverExpires)
+- [x] Basic HTML reporting
+- [x] PowerShell 5.1 support
+- [x] Tab completion for all parameters
+
+### Phase 2: Parity
+- [ ] Additional rules implemented
+- [ ] PSWriteHTML integration
+- [ ] PowerShell 7.x parallel scanning
+- [ ] JSON/SARIF export
+- [ ] Remediation script generation
+
+### Phase 3: Innovation
+- [ ] Differential scanning / baselines
+- [ ] Live dashboard
+- [ ] Microsoft Graph integration (Entra ID)
+- [ ] Community rule gallery
+- [ ] Impact analysis
+
+### Phase 4: Ecosystem
+- [ ] VS Code extension
+- [ ] GitHub Actions integration
+- [ ] Azure DevOps tasks
+- [ ] Documentation site
+
+---
+
+## 10. Getting Started
+
+```powershell
+# Install from PowerShell Gallery (future)
+Install-Module ADScout -Scope CurrentUser
+
+# Quick scan
+Invoke-ADScoutScan | Format-Table RuleId, Score, Description
+
+# Full scan with HTML report
+Invoke-ADScoutScan | Export-ADScoutReport -Format HTML -Path "./ADSecurityReport.html"
+
+# Interactive exploration
+Show-Command Invoke-ADScoutScan  # GUI for parameter discovery
+
+# Add custom rule
+New-ADScoutRule -Name "MyCustomCheck" -Category Anomalies -Path ./MyRules
+
+# Register custom rules
+Register-ADScoutRule -Path ./MyRules
+
+# Run scan with all rules
+Invoke-ADScoutScan
+```
+
+---
+
+*"In the world of security, sharing knowledge is not a weakness—it's our greatest strength."*
