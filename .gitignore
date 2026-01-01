@@ -65,8 +65,8 @@ logs/
 # Node modules (if any npm tooling added later)
 node_modules/
 
-# Documentation build
-/docs/*.md
+# Documentation build (auto-generated only)
+# Note: Manually created docs/*.md files should be tracked
 !/docs/.gitkeep
 
 # PSScriptAnalyzer
