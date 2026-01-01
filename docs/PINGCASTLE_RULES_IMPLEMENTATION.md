@@ -2,29 +2,102 @@
 
 Based on research from [PingCastle documentation](https://www.pingcastle.com/documentation/) and [GitHub repository](https://github.com/netwrix/pingcastle), this document outlines PingCastle rules that can be directly implemented in AD-Scout.
 
-## Current AD-Scout Coverage (19 Rules)
+## Current AD-Scout Coverage (53 Rules)
 
-| Rule ID | Category | Equivalent PingCastle |
-|---------|----------|----------------------|
-| S-PwdNeverExpires | StaleObjects | S-PwdNeverExpires |
-| S-InactiveUsers | StaleObjects | S-Inactive |
-| S-InactiveComputers | StaleObjects | S-C_Inactive |
-| S-DisabledAccountsWithGroupMembership | StaleObjects | (unique) |
-| K-Kerberoasting | Kerberos | A-Krbtgt (partial) |
-| K-ASREPRoasting | Kerberos | S-DesEnabled (related) |
-| K-UnconstrainedDelegation | Kerberos | P-Delegated |
-| P-PrivilegedGroupMembership | PrivilegedAccess | P-AdminNum |
-| P-AdminSDHolder | PrivilegedAccess | A-AdminSDHolder |
-| P-ServiceAccountPrivileges | PrivilegedAccess | P-ServiceDomainAdmin |
-| T-SIDFilteringDisabled | Trusts | T-SIDFiltering |
-| T-SelectiveAuthDisabled | Trusts | (related) |
-| T-TrustTransitivity | Trusts | T-Downlevel |
-| G-GPPPasswords | GPO | A-PwdGPO |
-| G-GPOPermissions | GPO | (unique) |
-| G-UnlinkedGPOs | GPO | (unique) |
-| C-ESC1-VulnerableTemplate | PKI | A-CertEnroll* |
-| C-ESC8-WebEnrollment | PKI | A-CertEnroll* |
-| C-WeakCryptoTemplates | PKI | A-WeakRSARootCert |
+### Summary by Category
+| Category | Count | Description |
+|----------|-------|-------------|
+| Anomalies (A-) | 11 | Configuration weaknesses and misconfigurations |
+| StaleObjects (S-) | 11 | Stale accounts, obsolete systems, cleanup needed |
+| PrivilegedAccess (P-) | 9 | Privileged access risks and delegation issues |
+| Kerberos (K-) | 4 | Kerberos security issues |
+| Trusts (T-) | 5 | Trust relationship risks |
+| GPO (G-) | 4 | Group Policy security issues |
+| PKI (C-) | 8 | Certificate Services (ADCS) vulnerabilities |
+| **Total** | **53** | |
+
+### Implemented Rules
+
+#### Anomalies (A-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| A-Krbtgt | Krbtgt Password Age | Critical | A-Krbtgt |
+| A-LMHash | LM Hash Storage Enabled | High | A-LMHashAuthorized |
+| A-NoLAPS | LAPS Not Deployed | High | A-LAPS_Not_Installed |
+| A-DCLdapSign | LDAP Signing Not Required | High | A-DCLdapSign |
+| A-SMBSigning | SMB Signing Not Required | High | A-SMB2SignatureNotRequired |
+| A-NullSession | Null Session Access | High | A-NullSession |
+| A-WeakPwdPolicy | Weak Password Policy | High | A-MinPwdLen |
+| A-PreWin2000 | Pre-Windows 2000 Access | High | A-PreWin2000Anonymous |
+| A-AuditDC | DC Audit Policy | High | A-AuditDC |
+| A-NoScriptLogging | PowerShell Logging Disabled | Medium | A-AuditPowershell |
+| A-RecycleBin | AD Recycle Bin Disabled | Medium | (unique) |
+
+#### StaleObjects (S-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| S-PwdNeverExpires | Password Never Expires | Medium | S-PwdNeverExpires |
+| S-InactiveUsers | Inactive User Accounts | Low | S-Inactive |
+| S-InactiveComputers | Inactive Computer Accounts | Low | S-C_Inactive |
+| S-DisabledAccountsWithGroupMembership | Disabled Accounts with Group Membership | Low | (unique) |
+| S-ObsoleteDC | Obsolete DC Operating System | Critical | S-DC_Obsolete |
+| S-ObsoleteOS | Obsolete Member Systems | High | S-OS_Obsolete |
+| S-PwdNotRequired | Password Not Required Flag | High | S-PwdNotRequired |
+| S-DESEncryption | DES Kerberos Encryption | Medium | S-DesEnabled |
+| S-ReversiblePwd | Reversible Password Encryption | High | S-Reversible |
+| S-UnrestrictedJoin | Unrestricted Computer Join | Medium | S-ADRegistration |
+| S-DuplicateSPN | Duplicate SPNs | Medium | S-Duplicate |
+| S-AdminCount | Stale AdminCount Attribute | Low | (unique) |
+
+#### PrivilegedAccess (P-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| P-PrivilegedGroupMembership | Excessive Privileged Users | High | P-AdminNum |
+| P-AdminSDHolder | AdminSDHolder Modification | High | A-AdminSDHolder |
+| P-ServiceAccountPrivileges | Service Account Privileges | Medium | P-ServiceDomainAdmin |
+| P-DelegationEveryone | Dangerous Delegation to Everyone | Critical | P-DelegationEveryone |
+| P-SchemaAdmin | Schema Admins Populated | Medium | P-SchemaAdmin |
+| P-DangerousACL | DCSync and Dangerous Rights | Critical | P-DangerousExtendedRight |
+| P-DefaultAdmin | Default Administrator Active | Medium | P-AdminLogin |
+| P-DNSAdmin | DnsAdmins Privilege Escalation | High | P-DNSDelegation |
+| P-NoProtectedUsers | Protected Users Not Used | Medium | P-ProtectedUsers |
+
+#### Kerberos (K-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| K-Kerberoasting | Kerberoastable Accounts | High | A-Krbtgt (related) |
+| K-ASREPRoasting | AS-REP Roastable Accounts | High | (unique) |
+| K-UnconstrainedDelegation | Unconstrained Delegation | High | P-Delegated |
+| K-ConstrainedDelegation | Constrained Delegation to Sensitive Services | High | P-Delegated |
+
+#### Trusts (T-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| T-SIDFilteringDisabled | SID Filtering Disabled | High | T-SIDFiltering |
+| T-SelectiveAuthDisabled | Selective Authentication Disabled | Medium | (related) |
+| T-TrustTransitivity | Trust Transitivity Issues | Medium | T-Downlevel |
+| T-SIDHistorySameDomain | SID History Same Domain | Critical | T-SIDHistorySameDomain |
+| T-SIDHistoryUnknown | SID History Unknown Domain | Medium | T-SIDHistoryUnknown |
+| T-InactiveTrust | Inactive Domain Trust | Medium | T-Inactive |
+
+#### GPO (G-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| G-GPPPasswords | GPP Passwords | Critical | A-PwdGPO |
+| G-GPOPermissions | Insecure GPO Permissions | High | (unique) |
+| G-UnlinkedGPOs | Unlinked GPOs | Low | (unique) |
+| G-SYSVOLPermissions | Insecure SYSVOL Permissions | High | (unique) |
+
+#### PKI/ADCS (C-)
+| Rule ID | Title | Severity | PingCastle Equivalent |
+|---------|-------|----------|----------------------|
+| C-ESC1-VulnerableTemplate | ESC1 Vulnerable Template | Critical | A-CertEnroll* |
+| C-ESC2-AnyPurpose | ESC2 Any Purpose Template | High | A-CertTempAnyPurpose |
+| C-ESC3-RequestAgent | ESC3 Request Agent | Critical | A-CertTempAgent |
+| C-ESC6-EDITF | ESC6 EDITF_ATTRIBUTESUBJECTALTNAME2 | Critical | A-CertTempCustomSubject |
+| C-ESC8-WebEnrollment | ESC8 Web Enrollment | High | A-CertEnroll* |
+| C-ESC8-WebEnrollNTLM | ESC8 Web Enrollment NTLM Relay | Critical | A-CertEnroll* |
+| C-WeakCryptoTemplates | Weak Crypto Templates | Medium | A-WeakRSARootCert |
 
 ---
 
