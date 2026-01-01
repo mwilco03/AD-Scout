@@ -76,6 +76,16 @@ function Get-ADScoutUserData {
         'SIDHistory'
         'PrimaryGroupID'
         'ObjectSID'
+        # Ephemeral persistence attributes
+        'ScriptPath'
+        'ProfilePath'
+        'HomeDirectory'
+        'HomeDrive'
+        'msTSInitialProgram'
+        'msTSWorkDirectory'
+        'msTSHomeDirectory'
+        'msTSHomeDrive'
+        'msDS-KeyCredentialLink'
     )
 
     if (-not $Properties) {
@@ -137,6 +147,16 @@ function Get-ADScoutUserData {
             SIDHistory               = $_.SIDHistory
             PrimaryGroupID           = $_.PrimaryGroupID
             ObjectSID                = $_.ObjectSID
+            # Ephemeral persistence attributes
+            ScriptPath               = $_.ScriptPath
+            ProfilePath              = $_.ProfilePath
+            HomeDirectory            = $_.HomeDirectory
+            HomeDrive                = $_.HomeDrive
+            TSInitialProgram         = $_.msTSInitialProgram
+            TSWorkDirectory          = $_.msTSWorkDirectory
+            TSHomeDirectory          = $_.msTSHomeDirectory
+            TSHomeDrive              = $_.msTSHomeDrive
+            KeyCredentialLink        = $_.'msDS-KeyCredentialLink'
         }
     }
 
@@ -204,7 +224,11 @@ function Get-ADScoutUserDataFallback {
             'lastlogon', 'lastlogontimestamp', 'logoncount', 'whencreated', 'whenchanged',
             'memberof', 'admincount', 'serviceprincipalname',
             'msds-allowedtodelegateto', 'description', 'sidhistory',
-            'primarygroupid', 'objectsid'
+            'primarygroupid', 'objectsid',
+            # Ephemeral persistence attributes
+            'scriptpath', 'profilepath', 'homedirectory', 'homedrive',
+            'mstsinitialprogram', 'mstsworkdirectory', 'mstshomedirectory', 'mstshomedrive',
+            'msds-keycredentiallink'
         )
 
         foreach ($prop in $ldapProperties) {
@@ -251,6 +275,16 @@ function Get-ADScoutUserDataFallback {
                 SIDHistory               = @($props['sidhistory'])
                 PrimaryGroupID           = $props['primarygroupid'][0]
                 ObjectSID                = (New-Object Security.Principal.SecurityIdentifier($props['objectsid'][0], 0)).Value
+                # Ephemeral persistence attributes
+                ScriptPath               = [string]$props['scriptpath'][0]
+                ProfilePath              = [string]$props['profilepath'][0]
+                HomeDirectory            = [string]$props['homedirectory'][0]
+                HomeDrive                = [string]$props['homedrive'][0]
+                TSInitialProgram         = [string]$props['mstsinitialprogram'][0]
+                TSWorkDirectory          = [string]$props['mstsworkdirectory'][0]
+                TSHomeDirectory          = [string]$props['mstshomedirectory'][0]
+                TSHomeDrive              = [string]$props['mstshomedrive'][0]
+                KeyCredentialLink        = @($props['msds-keycredentiallink'])
             }
         }
 
