@@ -49,7 +49,7 @@ $script:ADScoutCache = @{
 # Register argument completers
 Register-ArgumentCompleter -CommandName Invoke-ADScoutScan -ParameterName Category -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'All') |
+    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'All') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
@@ -63,7 +63,7 @@ Register-ArgumentCompleter -CommandName Export-ADScoutReport -ParameterName Form
 
 Register-ArgumentCompleter -CommandName Get-ADScoutRule -ParameterName Category -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts') |
+    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
@@ -79,7 +79,9 @@ Register-ArgumentCompleter -CommandName Get-ADScoutRule -ParameterName Id -Scrip
                 try {
                     $rule = . $_.FullName
                     if ($rule.Id -like "$wordToComplete*") {
-                        [System.Management.Automation.CompletionResult]::new($rule.Id, $rule.Id, 'ParameterValue', $rule.Name)
+                        # Handle both Name and Title schemas
+                        $ruleName = if ($rule.Name) { $rule.Name } else { $rule.Title }
+                        [System.Management.Automation.CompletionResult]::new($rule.Id, $rule.Id, 'ParameterValue', $ruleName)
                     }
                 }
                 catch { }

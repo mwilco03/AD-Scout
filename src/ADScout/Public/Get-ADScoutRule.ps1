@@ -42,7 +42,7 @@ function Get-ADScoutRule {
         [string[]]$Id,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI')]
         [string[]]$Category,
 
         [Parameter()]
@@ -78,31 +78,127 @@ function Get-ADScoutRule {
                     $rule = . $file.FullName
 
                     if ($rule -is [hashtable] -and $rule.Id) {
+                        # Normalize rule schema - support both Schema A and Schema B
+                        # Schema A: Uses ScriptBlock, Name, Computation, Points, MaxPoints
+                        # Schema B: Uses Detect, Title, Scoring hashtable, Weight
+
+                        # Normalize Name (Schema A: Name, Schema B: Title)
+                        $ruleName = if ($rule.Name) { $rule.Name } else { $rule.Title }
+
+                        # Normalize ScriptBlock (Schema A: ScriptBlock, Schema B: Detect)
+                        $ruleScriptBlock = if ($rule.ScriptBlock) { $rule.ScriptBlock } else { $rule.Detect }
+
+                        # Normalize Computation (Schema A: Computation, Schema B: Scoring.Type)
+                        $ruleComputation = if ($rule.Computation) {
+                            $rule.Computation
+                        } elseif ($rule.Scoring -and $rule.Scoring.Type) {
+                            # Map Schema B scoring types to Schema A
+                            switch ($rule.Scoring.Type) {
+                                'PerDiscovery' { 'PerDiscover' }
+                                default { $rule.Scoring.Type }
+                            }
+                        } else {
+                            'PerDiscover'
+                        }
+
+                        # Normalize Points (Schema A: Points, Schema B: Scoring.PerItem or 1)
+                        $rulePoints = if ($rule.Points) {
+                            $rule.Points
+                        } elseif ($rule.Scoring -and $rule.Scoring.PerItem) {
+                            $rule.Scoring.PerItem
+                        } else {
+                            1
+                        }
+
+                        # Normalize MaxPoints (Schema A: MaxPoints, Schema B: Weight)
+                        $ruleMaxPoints = if ($rule.MaxPoints) {
+                            $rule.MaxPoints
+                        } elseif ($rule.Weight) {
+                            $rule.Weight
+                        } else {
+                            100
+                        }
+
+                        # Normalize Threshold (Schema A: Threshold, Schema B: Scoring.Threshold or Scoring.Minimum)
+                        $ruleThreshold = if ($null -ne $rule.Threshold) {
+                            $rule.Threshold
+                        } elseif ($rule.Scoring -and $null -ne $rule.Scoring.Threshold) {
+                            $rule.Scoring.Threshold
+                        } elseif ($rule.Scoring -and $null -ne $rule.Scoring.Minimum) {
+                            $rule.Scoring.Minimum
+                        } else {
+                            $null
+                        }
+
+                        # Normalize MITRE (Schema A: array, Schema B: hashtable with Techniques)
+                        $ruleMITRE = if ($rule.MITRE -is [array]) {
+                            $rule.MITRE
+                        } elseif ($rule.MITRE -is [hashtable] -and $rule.MITRE.Techniques) {
+                            $rule.MITRE.Techniques
+                        } else {
+                            @()
+                        }
+
+                        # Normalize CIS/STIG/ANSSI (ensure arrays)
+                        $ruleCIS = if ($rule.CIS -is [array]) { $rule.CIS } else { @($rule.CIS) | Where-Object { $_ } }
+                        $ruleSTIG = if ($rule.STIG -is [array]) { $rule.STIG } else { @($rule.STIG) | Where-Object { $_ } }
+                        $ruleANSSI = if ($rule.ANSSI -is [array]) { $rule.ANSSI } else { @($rule.ANSSI) | Where-Object { $_ } }
+
+                        # Normalize Description
+                        $ruleDescription = $rule.Description
+
+                        # Normalize Remediation (Schema A: scriptblock, Schema B: hashtable with Script)
+                        $ruleRemediation = if ($rule.Remediation -is [scriptblock]) {
+                            $rule.Remediation
+                        } elseif ($rule.Remediation -is [hashtable] -and $rule.Remediation.Script) {
+                            $rule.Remediation.Script
+                        } else {
+                            $null
+                        }
+
+                        # Normalize TechnicalExplanation
+                        $ruleTechnicalExplanation = if ($rule.TechnicalExplanation) {
+                            $rule.TechnicalExplanation
+                        } elseif ($rule.Remediation -is [hashtable] -and $rule.Remediation.Description) {
+                            $rule.Remediation.Description
+                        } else {
+                            $null
+                        }
+
+                        # Normalize References (Schema A: array of strings, Schema B: array of hashtables)
+                        $ruleReferences = if ($rule.References -and $rule.References[0] -is [hashtable]) {
+                            $rule.References | ForEach-Object { $_.Url }
+                        } else {
+                            $rule.References
+                        }
+
                         # Convert hashtable to PSCustomObject for better display
                         $ruleObject = [PSCustomObject]@{
                             PSTypeName    = 'ADScoutRule'
                             Id            = $rule.Id
-                            Name          = $rule.Name
+                            Name          = $ruleName
                             Category      = $rule.Category
                             Model         = $rule.Model
                             Version       = $rule.Version
-                            Computation   = $rule.Computation
-                            Points        = $rule.Points
-                            MaxPoints     = $rule.MaxPoints
-                            Threshold     = $rule.Threshold
-                            MITRE         = $rule.MITRE
-                            CIS           = $rule.CIS
-                            STIG          = $rule.STIG
-                            ANSSI         = $rule.ANSSI
-                            ScriptBlock   = $rule.ScriptBlock
+                            Computation   = $ruleComputation
+                            Points        = $rulePoints
+                            MaxPoints     = $ruleMaxPoints
+                            Threshold     = $ruleThreshold
+                            MITRE         = $ruleMITRE
+                            CIS           = $ruleCIS
+                            STIG          = $ruleSTIG
+                            ANSSI         = $ruleANSSI
+                            ScriptBlock   = $ruleScriptBlock
                             DetailProperties = $rule.DetailProperties
                             DetailFormat  = $rule.DetailFormat
-                            Remediation   = $rule.Remediation
-                            Description   = $rule.Description
-                            TechnicalExplanation = $rule.TechnicalExplanation
-                            References    = $rule.References
+                            Remediation   = $ruleRemediation
+                            Description   = $ruleDescription
+                            TechnicalExplanation = $ruleTechnicalExplanation
+                            References    = $ruleReferences
                             Prerequisites = $rule.Prerequisites
                             AppliesTo     = $rule.AppliesTo
+                            DataSource    = $rule.DataSource
+                            Severity      = $rule.Severity
                             SourceFile    = $file.FullName
                         }
 

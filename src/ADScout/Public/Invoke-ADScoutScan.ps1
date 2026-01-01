@@ -71,7 +71,7 @@ function Invoke-ADScoutScan {
         [PSCredential]$Credential,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'All')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'All')]
         [string[]]$Category = 'All',
 
         [Parameter()]
