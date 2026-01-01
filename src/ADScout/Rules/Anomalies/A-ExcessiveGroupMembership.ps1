@@ -4,20 +4,24 @@
 
 .DESCRIPTION
     Uses Z-score analysis to identify users who belong to significantly
-    more groups than their peers. This can indicate:
-    - Privilege creep over time
-    - Over-provisioned accounts
-    - Potential compromise (attacker adding to groups)
-    - Service accounts misused as user accounts
+    more groups than their peers. Supports two comparison modes:
+
+    1. Peer comparison (default): Compares users within the same OU
+       - IT staff compared to IT staff, HR to HR, etc.
+       - Reduces false positives from legitimate role differences
+
+    2. Global comparison (fallback): Compares against all users
+       - Used when OU has fewer than 5 users
+       - Provides domain-wide baseline
 
 .NOTES
     Rule ID    : A-ExcessiveGroupMembership
     Category   : Anomalies
     Author     : AD-Scout
-    Version    : 1.0.0
+    Version    : 1.1.0
 
     Statistical Method: Z-Score with threshold of 2.0 (≈95th percentile)
-    Minimum users required: 10 (for meaningful statistics)
+    Peer comparison requires 5+ users per OU, otherwise falls back to global
 #>
 
 @{
@@ -26,7 +30,7 @@
     Name        = "Excessive Group Membership"
     Category    = "Anomalies"
     Model       = "FrequencyAnalysis"
-    Version     = "1.0.0"
+    Version     = "1.1.0"
 
     # === SCORING ===
     Computation = "PerDiscover"
@@ -44,60 +48,84 @@
     ScriptBlock = {
         param([Parameter(Mandatory)][hashtable]$ADData)
 
+        # Configuration
+        $zThreshold = 2.0           # Z-score threshold for outlier detection
+        $minPeerGroupSize = 5       # Minimum users in OU for peer comparison
+        $minGlobalSize = 10         # Minimum users for global comparison
+
         # Get enabled users only
         $users = @($ADData.Users | Where-Object { $_.Enabled -eq $true })
 
-        # Need minimum sample size for meaningful statistics
-        if ($users.Count -lt 10) {
-            Write-Verbose "Insufficient users for statistical analysis (need 10+, have $($users.Count))"
+        if ($users.Count -lt $minGlobalSize) {
+            Write-Verbose "Insufficient users for statistical analysis (need $minGlobalSize+, have $($users.Count))"
             return @()
         }
 
-        # Calculate group counts for each user
-        $userGroupData = $users | ForEach-Object {
-            @{
-                User       = $_
-                GroupCount = @($_.MemberOf).Count
-            }
-        }
+        # Calculate global statistics as fallback
+        $globalGroupCounts = @($users | ForEach-Object { @($_.MemberOf).Count })
+        $globalStats = Get-ADScoutStatistics -Values $globalGroupCounts
 
-        # Get statistics
-        $groupCounts = @($userGroupData | ForEach-Object { $_.GroupCount })
-        $stats = Get-ADScoutStatistics -Values $groupCounts
-
-        # Handle edge case: everyone has same number of groups
-        if ($stats.StdDev -eq 0) {
-            Write-Verbose "No variation in group membership counts"
+        if ($globalStats.StdDev -eq 0) {
+            Write-Verbose "No variation in group membership counts globally"
             return @()
         }
 
-        # Z-score threshold (2.0 = ~95th percentile)
-        $zThreshold = 2.0
+        # Group users by OU for peer comparison
+        $peerGroups = Get-ADScoutPeerBaseline -Objects $users -ValueProperty { @($_.MemberOf).Count }
 
-        # Find outliers
-        $userGroupData | Where-Object {
-            $zscore = ($_.GroupCount - $stats.Mean) / $stats.StdDev
-            $zscore -gt $zThreshold
-        } | ForEach-Object {
-            $zscore = ($_.GroupCount - $stats.Mean) / $stats.StdDev
+        $findings = @()
 
-            [PSCustomObject]@{
-                SamAccountName    = $_.User.SamAccountName
-                DistinguishedName = $_.User.DistinguishedName
-                DisplayName       = $_.User.DisplayName
-                GroupCount        = $_.GroupCount
-                ZScore            = [math]::Round($zscore, 2)
-                EnvironmentMean   = [math]::Round($stats.Mean, 1)
-                EnvironmentStdDev = [math]::Round($stats.StdDev, 1)
-                Threshold         = [math]::Round($stats.Mean + ($zThreshold * $stats.StdDev), 0)
-                Severity          = if ($zscore -gt 3) { 'Critical' } elseif ($zscore -gt 2.5) { 'High' } else { 'Medium' }
+        foreach ($peerGroup in $peerGroups) {
+            $ouPath = $peerGroup.OUPath
+            $ouUsers = $peerGroup.Objects
+            $ouStats = $peerGroup.Statistics
+
+            # Determine comparison mode
+            $usePeerComparison = ($peerGroup.ObjectCount -ge $minPeerGroupSize) -and ($ouStats.StdDev -gt 0)
+
+            if ($usePeerComparison) {
+                $comparisonMode = "Peer"
+                $stats = $ouStats
+            }
+            else {
+                $comparisonMode = "Global"
+                $stats = $globalStats
+            }
+
+            # Analyze each user in this OU
+            foreach ($user in $ouUsers) {
+                $groupCount = @($user.MemberOf).Count
+
+                # Skip if stats invalid
+                if ($stats.StdDev -eq 0) { continue }
+
+                $zscore = ($groupCount - $stats.Mean) / $stats.StdDev
+
+                if ($zscore -gt $zThreshold) {
+                    $findings += [PSCustomObject]@{
+                        SamAccountName    = $user.SamAccountName
+                        DistinguishedName = $user.DistinguishedName
+                        DisplayName       = $user.DisplayName
+                        GroupCount        = $groupCount
+                        ZScore            = [math]::Round($zscore, 2)
+                        ComparisonMode    = $comparisonMode
+                        PeerGroup         = if ($comparisonMode -eq "Peer") { $ouPath } else { "All Users" }
+                        PeerGroupSize     = if ($comparisonMode -eq "Peer") { $peerGroup.ObjectCount } else { $users.Count }
+                        PeerMean          = [math]::Round($stats.Mean, 1)
+                        PeerStdDev        = [math]::Round($stats.StdDev, 1)
+                        Threshold         = [math]::Round($stats.Mean + ($zThreshold * $stats.StdDev), 0)
+                        Severity          = if ($zscore -gt 3) { 'Critical' } elseif ($zscore -gt 2.5) { 'High' } else { 'Medium' }
+                    }
+                }
             }
         }
+
+        return $findings
     }
 
     # === OUTPUT ===
-    DetailProperties = @("SamAccountName", "GroupCount", "ZScore", "EnvironmentMean", "Severity")
-    DetailFormat     = "{SamAccountName}: {GroupCount} groups (Z={ZScore}, mean={EnvironmentMean})"
+    DetailProperties = @("SamAccountName", "GroupCount", "ZScore", "ComparisonMode", "PeerMean", "Severity")
+    DetailFormat     = "{SamAccountName}: {GroupCount} groups (Z={ZScore} vs {ComparisonMode} mean={PeerMean})"
 
     # === REMEDIATION ===
     Remediation = {
@@ -105,13 +133,20 @@
         @"
 
 # Review group memberships for: $($Finding.SamAccountName)
-# Current: $($Finding.GroupCount) groups (environment average: $($Finding.EnvironmentMean))
+# Current: $($Finding.GroupCount) groups
+# Comparison: $($Finding.ComparisonMode) ($($Finding.PeerGroup), $($Finding.PeerGroupSize) users)
+# Peer average: $($Finding.PeerMean) groups
 
 # List current group memberships:
 Get-ADUser -Identity '$($Finding.SamAccountName)' -Properties MemberOf |
     Select-Object -ExpandProperty MemberOf |
     ForEach-Object { (Get-ADGroup `$_).Name } |
     Sort-Object
+
+# Compare to a typical peer in the same OU:
+# Get-ADUser -Filter * -SearchBase '$($Finding.PeerGroup)' -Properties MemberOf |
+#     Select-Object SamAccountName, @{N='GroupCount';E={@(`$_.MemberOf).Count}} |
+#     Sort-Object GroupCount -Descending | Select-Object -First 10
 
 # Review and remove unnecessary memberships:
 # Remove-ADGroupMember -Identity 'GroupName' -Members '$($Finding.SamAccountName)' -Confirm
@@ -120,11 +155,24 @@ Get-ADUser -Identity '$($Finding.SamAccountName)' -Properties MemberOf |
     }
 
     # === DOCUMENTATION ===
-    Description = "Users with group membership counts significantly above the environment average."
+    Description = "Users with group membership counts significantly above their peer group average."
 
     TechnicalExplanation = @"
 This rule uses statistical analysis (Z-score) to identify users who belong to
-an unusually high number of groups compared to their peers in the environment.
+an unusually high number of groups compared to their peers.
+
+PEER COMPARISON MODE (v1.1.0):
+Users are now compared against peers in the same OU, not the entire domain.
+This dramatically reduces false positives because:
+- IT administrators legitimately have more groups than HR staff
+- Service desk has different access needs than accounting
+- Comparing within peer groups reveals TRUE outliers
+
+Comparison logic:
+1. Group users by their OU (first level)
+2. If OU has 5+ users: compare within OU (Peer mode)
+3. If OU has <5 users: compare against all users (Global mode)
+4. Flag users with Z-score > 2.0 in their comparison group
 
 Why this matters:
 - Privilege creep: Users accumulate group memberships over time as they change
@@ -134,15 +182,10 @@ Why this matters:
 - Least privilege violation: Users should only have access necessary for their
   role
 
-Statistical method:
-- Z-score measures how many standard deviations a value is from the mean
-- Threshold of 2.0 means flagging users in the top ~5% of group counts
-- This adapts to your environment - a user in 50 groups might be normal in one
-  org but anomalous in another
-
 Example:
-- Environment mean: 5 groups, StdDev: 3
-- User with 15 groups: Z = (15-5)/3 = 3.33 → Flagged as anomaly
+- IT OU mean: 25 groups, StdDev: 5
+- IT user with 45 groups: Z = (45-25)/5 = 4.0 → Flagged as Critical
+- Same user globally might not stand out (global mean might be 10)
 "@
 
     References = @(
