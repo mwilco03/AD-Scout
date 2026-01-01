@@ -32,7 +32,7 @@
 
     MITRE = @{
         Tactics    = @('TA0003', 'TA0006', 'TA0008')  # Persistence, Credential Access, Lateral Movement
-        Techniques = @('T1098.004', 'T1550.003')  # SSH Authorized Keys (closest match), Use Alternate Authentication Material
+        Techniques = @('T1098', 'T1550.003')  # Account Manipulation, Use Alternate Authentication Material
     }
 
     CIS   = @('5.18')
