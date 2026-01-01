@@ -33,13 +33,36 @@ Get-ADScoutRule
 Get-ADScoutRemediation -RuleId S-PwdNeverExpires
 ```
 
+## Remote Execution (IWR Pipeline)
+
+Run AD-Scout directly from the internet without installation—perfect for incident response, quick assessments, or environments where module installation isn't feasible.
+
+```powershell
+# One-liner: Download and execute
+iwr https://raw.githubusercontent.com/mwilco03/AD-Scout/main/src/Invoke-ADScoutRemote.ps1 | iex
+
+# With parameters
+$script = (iwr https://raw.githubusercontent.com/mwilco03/AD-Scout/main/src/Invoke-ADScoutRemote.ps1).Content
+& ([scriptblock]::Create($script)) -Category PrivilegedAccounts -Format JSON
+
+# Quick scan (Critical/High severity only)
+& ([scriptblock]::Create($script)) -QuickScan
+
+# Load bundle directly for manual control
+iwr https://raw.githubusercontent.com/mwilco03/AD-Scout/main/dist/ADScout.bundle.ps1 | iex
+Invoke-ADScoutScan | Export-ADScoutReport -Format Console
+```
+
+See [examples/Remote-Execution.ps1](examples/Remote-Execution.ps1) for advanced scenarios including proxy configuration, hash verification, and SIEM integration.
+
 ## Key Features
 
 - **PowerShell-first**: Native module experience with tab-completion, pipeline support, and Show-Command integration
+- **Remote execution**: Run directly via `iwr | iex` without installation—ideal for IR and assessments
 - **Community-extensible**: Drop-in rule files with no compilation required
 - **Cross-version compatible**: Works on PowerShell 5.1 and 7.x (Desktop and Core editions)
 - **Output-flexible**: Pluggable reporters (HTML, JSON, CSV, SARIF, Console, and more)
-- **Security framework mappings**: Built-in MITRE ATT&CK, CIS, and STIG references
+- **Security framework mappings**: Built-in MITRE ATT&CK, CIS, NIST 800-53, and STIG references
 - **Remediation guidance**: Actionable scripts for each finding
 - **Enterprise-ready**: Credential support, throttling, and progress reporting
 
