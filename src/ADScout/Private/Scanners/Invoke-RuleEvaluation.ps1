@@ -4,11 +4,11 @@ function Invoke-RuleEvaluation {
         Evaluates a single rule against collected AD data.
 
     .DESCRIPTION
-        Takes a rule definition and the relevant collected data, executes the
-        rule's scriptblock, and returns structured findings.
+        Takes a normalized rule definition and the relevant collected data, executes the
+        rule's ScriptBlock, and returns structured findings.
 
     .PARAMETER Rule
-        The rule hashtable containing Id, Category, Detect scriptblock, etc.
+        The normalized rule object from Get-ADScoutRule.
 
     .PARAMETER Data
         The collected AD data to evaluate against.
@@ -22,7 +22,7 @@ function Invoke-RuleEvaluation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [hashtable]$Rule,
+        $Rule,
 
         [Parameter(Mandatory)]
         [AllowNull()]
@@ -44,8 +44,8 @@ function Invoke-RuleEvaluation {
                 return $null
             }
 
-            # Execute the detection scriptblock
-            $detectResult = & $Rule.Detect -Data $Data -Domain $Domain
+            # Execute the detection scriptblock (normalized to ScriptBlock property)
+            $detectResult = & $Rule.ScriptBlock -Data $Data -Domain $Domain
 
             # Handle different return types
             $findings = @()
@@ -67,18 +67,21 @@ function Invoke-RuleEvaluation {
                 $finding = [PSCustomObject]@{
                     PSTypeName    = 'ADScout.Finding'
                     RuleId        = $Rule.Id
+                    RuleName      = $Rule.Name
                     Category      = $Rule.Category
                     Severity      = $Rule.Severity
-                    Title         = $Rule.Title
                     Description   = $Rule.Description
                     Score         = $score
-                    MaxScore      = $Rule.Weight
-                    AffectedCount = $detectResult.Count
+                    MaxScore      = $Rule.MaxPoints
+                    FindingCount  = $detectResult.Count
                     Findings      = $detectResult
                     Remediation   = $Rule.Remediation
                     References    = $Rule.References
                     MITRE         = $Rule.MITRE
-                    Timestamp     = [datetime]::UtcNow
+                    CIS           = $Rule.CIS
+                    STIG          = $Rule.STIG
+                    TechnicalExplanation = $Rule.TechnicalExplanation
+                    ExecutedAt    = [datetime]::UtcNow
                     Domain        = $Domain
                 }
 
@@ -94,14 +97,15 @@ function Invoke-RuleEvaluation {
             return [PSCustomObject]@{
                 PSTypeName  = 'ADScout.Finding'
                 RuleId      = $Rule.Id
+                RuleName    = $Rule.Name
                 Category    = $Rule.Category
                 Severity    = 'Error'
-                Title       = "Rule Evaluation Error: $($Rule.Title)"
                 Description = "Failed to evaluate rule: $_"
                 Score       = 0
-                MaxScore    = $Rule.Weight
+                MaxScore    = $Rule.MaxPoints
+                FindingCount = 0
                 Error       = $_.Exception.Message
-                Timestamp   = [datetime]::UtcNow
+                ExecutedAt  = [datetime]::UtcNow
                 Domain      = $Domain
             }
         }
@@ -112,47 +116,51 @@ function Get-RuleScore {
     <#
     .SYNOPSIS
         Calculates the score for a rule based on its scoring type.
+
+    .DESCRIPTION
+        Uses the normalized rule properties (Computation, Points, MaxPoints, Threshold)
+        to calculate the appropriate score based on findings.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [hashtable]$Rule,
+        $Rule,
 
         [Parameter()]
         [array]$Findings
     )
 
-    $weight = $Rule.Weight
+    $maxPoints = $Rule.MaxPoints
+    $points = $Rule.Points
     $count = $Findings.Count
-    $scoringType = $Rule.Scoring.Type
+    $scoringType = $Rule.Computation
 
     switch ($scoringType) {
         'TriggerOnPresence' {
             # Full score if any finding exists
-            if ($count -gt 0) { return $weight } else { return 0 }
+            if ($count -gt 0) { return $maxPoints } else { return 0 }
         }
 
-        'PerDiscovery' {
+        'PerDiscover' {
             # Score per finding, up to max
-            $perItem = $Rule.Scoring.PerItem
-            return [Math]::Min($count * $perItem, $weight)
+            return [Math]::Min($count * $points, $maxPoints)
         }
 
         'TriggerOnThreshold' {
             # Full score only if count exceeds threshold
-            $threshold = $Rule.Scoring.Threshold
-            if ($count -ge $threshold) { return $weight } else { return 0 }
+            $threshold = $Rule.Threshold
+            if ($threshold -and $count -ge $threshold) { return $maxPoints } else { return 0 }
         }
 
         'TriggerIfLessThan' {
             # Full score if count is below minimum
-            $minimum = $Rule.Scoring.Minimum
-            if ($count -lt $minimum) { return $weight } else { return 0 }
+            $threshold = $Rule.Threshold
+            if ($threshold -and $count -lt $threshold) { return $maxPoints } else { return 0 }
         }
 
         default {
-            # Default to presence-based
-            if ($count -gt 0) { return $weight } else { return 0 }
+            # Default to per-discovery scoring
+            return [Math]::Min($count * $points, $maxPoints)
         }
     }
 }

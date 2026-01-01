@@ -1,20 +1,25 @@
 function Show-ADScoutDashboard {
     <#
     .SYNOPSIS
-        Launches an interactive web dashboard for AD-Scout results.
+        Displays an interactive dashboard for AD-Scout results.
 
     .DESCRIPTION
-        Starts a local web server and opens a browser to display
-        an interactive dashboard with scan results and trends.
+        Shows a formatted console dashboard with scan results including:
+        - Overall security score
+        - Findings by category
+        - Top issues by severity
+        - MITRE ATT&CK coverage
+
+        For detailed reports, use Export-ADScoutReport with HTML format.
 
     .PARAMETER Results
         Scan results to display. If not provided, runs a new scan.
 
     .PARAMETER Port
-        Local port for the web server. Defaults to 8080.
+        Reserved for future web dashboard functionality.
 
     .PARAMETER NoBrowser
-        Don't automatically open the browser.
+        Reserved for future web dashboard functionality.
 
     .EXAMPLE
         Show-ADScoutDashboard
@@ -26,12 +31,15 @@ function Show-ADScoutDashboard {
         Displays existing results in the dashboard.
 
     .EXAMPLE
-        Show-ADScoutDashboard -Port 9090 -NoBrowser
-        Starts dashboard on custom port without opening browser.
+        Invoke-ADScoutScan | Show-ADScoutDashboard
+        Pipeline results directly to the dashboard.
+
+    .OUTPUTS
+        ADScoutResult[]
+        Returns the results for pipeline usage.
 
     .NOTES
         Author: AD-Scout Contributors
-        The dashboard runs until stopped with Ctrl+C.
     #>
     [CmdletBinding()]
     param(
@@ -71,9 +79,7 @@ function Show-ADScoutDashboard {
             return
         }
 
-        # For now, display a simple console dashboard
-        # TODO: Implement full web dashboard
-
+        # Display console dashboard
         Write-Host "`nDashboard Summary" -ForegroundColor Cyan
         Write-Host "-----------------" -ForegroundColor Cyan
 

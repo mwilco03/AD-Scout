@@ -46,7 +46,7 @@ function New-ADScoutRule {
         [string]$Name,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI')]
         [string]$Category,
 
         [Parameter()]
@@ -66,6 +66,9 @@ function New-ADScoutRule {
             'StaleObjects'       { 'S' }
             'PrivilegedAccounts' { 'P' }
             'Trusts'             { 'T' }
+            'Kerberos'           { 'K' }
+            'GPO'                { 'G' }
+            'PKI'                { 'C' }
             default              { 'X' }
         }
 

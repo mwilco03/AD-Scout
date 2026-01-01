@@ -80,8 +80,8 @@ function Export-ADScoutJSONReport {
         Depth = 10
     }
 
-    if (-not $Compress) {
-        # PowerShell 7+ has -AsArray, but we handle it manually for compatibility
+    if ($Compress) {
+        $jsonParams.Compress = $true
     }
 
     $report | ConvertTo-Json @jsonParams | Out-File -FilePath $Path -Encoding UTF8
