@@ -316,6 +316,81 @@ Invoke-ADScoutScan | Select-Object RuleId, Score, FindingCount
 
 ## 6. Considerations & Design Decisions
 
+### Frequency Analysis & Statistical Anomaly Detection
+
+**Decision Date:** 2026-01-01
+**Status:** Approved
+
+#### Context
+
+Traditional AD security tools use static thresholds (e.g., "more than 5 Domain Admins = bad"). This approach fails to account for environmental variation—what's normal in a 50-person company differs from a 50,000-person enterprise.
+
+#### Decision
+
+Implement **statistical frequency analysis** to detect anomalies relative to the environment's own baseline, using data available via `[adsisearcher]` / `DirectorySearcher` without requiring RSAT tools.
+
+#### Statistical Methods
+
+| Method | Use Case | Formula |
+|--------|----------|---------|
+| **Z-Score** | Normally distributed data | `Z = (value - mean) / stddev` |
+| **IQR (Interquartile Range)** | Skewed distributions, robust to outliers | `Outlier if value > Q3 + 1.5×IQR` |
+| **Peer Comparison** | Role-based analysis | Compare within OU or department |
+
+#### Default Thresholds
+
+- **Z-Score threshold**: 2.0 (≈95th percentile) for warnings, 3.0 (≈99th percentile) for critical
+- **IQR multiplier**: 1.5 (standard), 3.0 (extreme outliers only)
+
+#### Reliable AD Attributes for Frequency Analysis
+
+| Attribute | Analysis Type | Reliability |
+|-----------|--------------|-------------|
+| `memberOf` | Group membership count | ✅ Highly reliable |
+| `whenCreated` | Account age | ✅ Highly reliable |
+| `lastLogonTimestamp` | Login recency | ✅ Reliable (14-day granularity) |
+| `pwdLastSet` | Password age | ✅ Highly reliable |
+| `adminCount` | Privilege indicator | ✅ Reliable |
+| `logonCount` | Login frequency | ⚠️ Environment-dependent |
+| `badPwdCount` | Failed logins | ❌ Unreliable (not replicated consistently) |
+
+#### Implemented Anomaly Rules
+
+| Rule ID | Detection | Method |
+|---------|-----------|--------|
+| `A-ExcessiveGroupMembership` | Users in statistically excessive groups | Z-Score / IQR |
+| `A-RapidPrivilegeAccumulation` | New accounts with above-average groups | Age + Z-Score |
+| `A-DormantPrivilegedAccount` | Privileged accounts with no recent logon | Threshold + adminCount |
+| `A-OrphanedAdminCount` | adminCount=1 but no privileged group membership | Set comparison |
+| `A-LogonCountAnomaly` | Unusual logon counts vs. peers | Z-Score (optional) |
+
+#### Architecture
+
+```
+src/ADScout/Private/Statistics/
+├── Get-ADScoutStatistics.ps1    # Mean, StdDev, Quartiles, IQR
+├── Get-ADScoutZScore.ps1        # Z-score calculation & outlier detection
+├── Get-ADScoutIQROutliers.ps1   # IQR-based outlier detection
+└── Get-ADScoutPeerBaseline.ps1  # OU/Department peer grouping
+```
+
+#### Why Not Event Log Analysis?
+
+Event logs (4624, 4625, etc.) provide richer login data but:
+- Require elevated permissions on DCs
+- May not be centrally collected
+- Add significant complexity
+
+The `[adsisearcher]` approach works on **any domain-joined machine** with standard user permissions, maximizing accessibility.
+
+#### Future Extensions
+
+- Historical baseline storage for trend analysis
+- Event log integration (optional module)
+- Machine learning anomaly scoring
+
+---
+
 ### Security
 - **Credential Handling**: Never store credentials; use `Get-Credential` or Windows auth
 - **Execution Policy**: Work within user's policy, don't bypass
