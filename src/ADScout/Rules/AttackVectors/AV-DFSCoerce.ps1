@@ -32,7 +32,7 @@
 
     MITRE = @{
         Tactics    = @('TA0006', 'TA0008')  # Credential Access, Lateral Movement
-        Techniques = @('T1187', 'T1557')    # Forced Authentication, LLMNR/NBT-NS Poisoning
+        Techniques = @('T1187', 'T1557.001')  # Forced Authentication, LLMNR/NBT-NS Poisoning and Relay
     }
 
     CIS   = @('5.4')
