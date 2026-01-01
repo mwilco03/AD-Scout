@@ -22,6 +22,7 @@
     CIS   = @('5.8')
     STIG  = @()
     ANSSI = @('vuln1_constrained_delegation')
+    NIST  = @('AC-6', 'SC-23')
 
     Scoring = @{
         Type = 'PerFinding'

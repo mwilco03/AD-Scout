@@ -21,6 +21,7 @@
     CIS   = @('5.7')
     STIG  = @('V-36439')
     ANSSI = @('vuln1_trusts_sidfiltering')
+    NIST  = @('IA-8')
 
     Scoring = @{
         Type = 'TriggerOnPresence'

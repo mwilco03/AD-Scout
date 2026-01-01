@@ -22,6 +22,7 @@
     CIS   = @('18.9.100.1', '18.9.100.2')
     STIG  = @('V-63351', 'V-63353')
     ANSSI = @('vuln1_powershell_logging')
+    NIST  = @('AU-2', 'AU-3', 'AU-12', 'SI-4')
 
     Scoring = @{
         Type = 'TriggerOnPresence'

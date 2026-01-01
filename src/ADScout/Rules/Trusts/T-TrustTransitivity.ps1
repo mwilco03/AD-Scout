@@ -21,6 +21,7 @@
     CIS   = @('5.6')
     STIG  = @('V-36438')
     ANSSI = @('vuln2_trusts_transitivity')
+    NIST  = @('AC-3')
 
     Scoring = @{
         Type      = 'PerDiscovery'

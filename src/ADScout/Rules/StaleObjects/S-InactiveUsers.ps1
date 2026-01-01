@@ -20,6 +20,7 @@
     CIS   = @('5.19')
     STIG  = @('V-36450')
     ANSSI = @('vuln2_stale_users')
+    NIST  = @('AC-2(3)', 'IA-4(4)')
 
     Scoring = @{
         Type       = 'TriggerOnThreshold'

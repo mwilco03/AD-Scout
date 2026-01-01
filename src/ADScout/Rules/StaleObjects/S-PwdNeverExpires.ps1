@@ -33,6 +33,7 @@
     CIS         = @("5.1.2", "5.2.8")     # Password Policy controls
     STIG        = @("V-63337")            # Password expiration requirement
     ANSSI       = @("R36")                # Password management
+    NIST        = @('AC-2', 'IA-5(1)')
 
     # === THE CHECK ===
     ScriptBlock = {

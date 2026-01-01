@@ -16,6 +16,7 @@
         'New-ADScoutRule'
         'Register-ADScoutRule'
         'Export-ADScoutReport'
+        'Export-ADScoutNISTReport'
         'Get-ADScoutRemediation'
         'Set-ADScoutConfig'
         'Get-ADScoutConfig'
@@ -28,7 +29,7 @@
 
     PrivateData       = @{
         PSData = @{
-            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS')
+            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53')
             LicenseUri   = 'https://github.com/mwilco03/AD-Scout/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/mwilco03/AD-Scout'
             IconUri      = ''

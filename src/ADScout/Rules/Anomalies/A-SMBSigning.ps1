@@ -22,6 +22,7 @@
     CIS   = @('2.3.9.1', '2.3.9.2')
     STIG  = @('V-63589')
     ANSSI = @('vuln1_smb_signing')
+    NIST  = @('AC-17(2)', 'CM-2', 'CM-6', 'SC-8(1)', 'SC-23')
 
     Scoring = @{
         Type = 'TriggerOnPresence'
