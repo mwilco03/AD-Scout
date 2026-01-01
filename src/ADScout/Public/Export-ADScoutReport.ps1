@@ -234,41 +234,202 @@ function Export-ADScoutReport {
             }
 
             'Markdown' {
+                # Calculate summary statistics
+                $totalScore = ($allResults | Measure-Object -Property Score -Sum).Sum
+                if ($null -eq $totalScore) { $totalScore = 0 }
+                $totalFindings = ($allResults | Measure-Object -Property FindingCount -Sum).Sum
+                if ($null -eq $totalFindings) { $totalFindings = 0 }
+                $maxPossibleScore = ($allResults | Measure-Object -Property MaxScore -Sum).Sum
+                if ($null -eq $maxPossibleScore -or $maxPossibleScore -eq 0) { $maxPossibleScore = 100 }
+
+                # Calculate security score
+                $securityScore = [math]::Max(0, [math]::Round(100 - (($totalScore / $maxPossibleScore) * 100)))
+                $scoreGrade = if ($securityScore -ge 90) { 'A' }
+                              elseif ($securityScore -ge 80) { 'B' }
+                              elseif ($securityScore -ge 70) { 'C' }
+                              elseif ($securityScore -ge 60) { 'D' }
+                              else { 'F' }
+
+                # Categorize findings by severity
+                $criticalFindings = @($allResults | Where-Object { $_.Score -ge 50 })
+                $highFindings = @($allResults | Where-Object { $_.Score -ge 30 -and $_.Score -lt 50 })
+                $mediumFindings = @($allResults | Where-Object { $_.Score -ge 15 -and $_.Score -lt 30 })
+                $lowFindings = @($allResults | Where-Object { $_.Score -ge 5 -and $_.Score -lt 15 })
+                $infoFindings = @($allResults | Where-Object { $_.Score -lt 5 })
+
                 $mdContent = @"
 # $Title
 
 **Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
-## Summary
+---
+
+## Executive Summary
 
 | Metric | Value |
 |--------|-------|
-| Rules with Findings | $($allResults.Count) |
-| Total Findings | $(($allResults | Measure-Object -Property FindingCount -Sum).Sum) |
-| Total Score | $(($allResults | Measure-Object -Property Score -Sum).Sum) |
+| **Security Score** | $securityScore/100 (Grade: $scoreGrade) |
+| **Total Risk Score** | $totalScore points |
+| **Rules with Findings** | $($allResults.Count) |
+| **Total Affected Objects** | $totalFindings |
 
-## Findings
+### Severity Breakdown
+
+| Severity | Count |
+|----------|-------|
+| Critical | $($criticalFindings.Count) |
+| High | $($highFindings.Count) |
+| Medium | $($mediumFindings.Count) |
+| Low | $($lowFindings.Count) |
+| Info | $($infoFindings.Count) |
+
+---
+
+## Category Breakdown
+
+| Category | Rules | Findings | Score |
+|----------|-------|----------|-------|
+
+"@
+
+                # Category summary
+                $allResults | Group-Object Category | Sort-Object { ($_.Group | Measure-Object -Property Score -Sum).Sum } -Descending | ForEach-Object {
+                    $catScore = ($_.Group | Measure-Object -Property Score -Sum).Sum
+                    $catFindings = ($_.Group | Measure-Object -Property FindingCount -Sum).Sum
+                    $mdContent += "| $($_.Name) | $($_.Count) | $catFindings | $catScore |`n"
+                }
+
+                $mdContent += @"
+
+---
+
+## Detailed Findings
 
 "@
 
                 foreach ($result in $allResults | Sort-Object -Property Score -Descending) {
+                    # Determine severity
+                    $severity = if ($result.Score -ge 50) { 'CRITICAL' }
+                               elseif ($result.Score -ge 30) { 'HIGH' }
+                               elseif ($result.Score -ge 15) { 'MEDIUM' }
+                               elseif ($result.Score -ge 5) { 'LOW' }
+                               else { 'INFO' }
+
                     $mdContent += @"
 
-### $($result.RuleId) - $($result.RuleName)
+### [$severity] $($result.RuleId) - $($result.RuleName)
 
-- **Category:** $($result.Category)
-- **Findings:** $($result.FindingCount)
-- **Score:** $($result.Score)/$($result.MaxScore)
-$(if ($result.MITRE) { "- **MITRE ATT&CK:** $($result.MITRE -join ', ')" })
-$(if ($result.CIS) { "- **CIS Controls:** $($result.CIS -join ', ')" })
+| Property | Value |
+|----------|-------|
+| **Severity** | $severity |
+| **Category** | $($result.Category) |
+| **Affected Objects** | $($result.FindingCount) |
+| **Score** | $($result.Score)/$($result.MaxScore) |
 
-$($result.Description)
+**Description:** $($result.Description)
 
 "@
+
+                    # Framework mappings
+                    $mappings = @()
+                    if ($result.MITRE -and $result.MITRE.Count -gt 0) {
+                        $mappings += "- **MITRE ATT&CK:** $($result.MITRE -join ', ')"
+                    }
+                    if ($result.CIS -and $result.CIS.Count -gt 0) {
+                        $mappings += "- **CIS Controls:** $($result.CIS -join ', ')"
+                    }
+                    if ($result.STIG -and $result.STIG.Count -gt 0) {
+                        $mappings += "- **DISA STIG:** $($result.STIG -join ', ')"
+                    }
+                    if ($result.NIST -and $result.NIST.Count -gt 0) {
+                        $mappings += "- **NIST 800-53:** $($result.NIST -join ', ')"
+                    }
+
+                    if ($mappings.Count -gt 0) {
+                        $mdContent += "**Framework Mappings:**`n"
+                        $mdContent += ($mappings -join "`n") + "`n"
+                    }
+
+                    # Show example findings
+                    if ($result.Findings -and $result.Findings.Count -gt 0) {
+                        $mdContent += "`n**Affected Objects (first 10):**`n`n"
+                        $displayFindings = $result.Findings | Select-Object -First 10
+                        foreach ($finding in $displayFindings) {
+                            $findingStr = if ($finding.SamAccountName) { $finding.SamAccountName }
+                                         elseif ($finding.Name) { $finding.Name }
+                                         elseif ($finding.DNSHostName) { $finding.DNSHostName }
+                                         else { ($finding | ConvertTo-Json -Compress -Depth 1) }
+                            $mdContent += "- ``$findingStr```n"
+                        }
+                        if ($result.FindingCount -gt 10) {
+                            $mdContent += "- *... and $($result.FindingCount - 10) more*`n"
+                        }
+                    }
+
+                    # Technical explanation if available
+                    if ($result.TechnicalExplanation) {
+                        $mdContent += "`n**Technical Details:** $($result.TechnicalExplanation)`n"
+                    }
+
+                    # References if available
+                    if ($result.References -and $result.References.Count -gt 0) {
+                        $mdContent += "`n**References:**`n"
+                        foreach ($ref in $result.References) {
+                            $mdContent += "- $ref`n"
+                        }
+                    }
+
+                    $mdContent += "`n---`n"
                 }
+
+                # Priority Recommendations
+                if ($criticalFindings.Count -gt 0 -or $highFindings.Count -gt 0) {
+                    $mdContent += @"
+
+## Priority Remediation Steps
+
+"@
+                    $priorityCount = 0
+                    $topIssues = $allResults | Sort-Object Score -Descending | Select-Object -First 10
+                    foreach ($issue in $topIssues) {
+                        $priorityCount++
+                        $severity = if ($issue.Score -ge 50) { 'CRITICAL' }
+                                   elseif ($issue.Score -ge 30) { 'HIGH' }
+                                   elseif ($issue.Score -ge 15) { 'MEDIUM' }
+                                   else { 'LOW' }
+                        $mdContent += "$priorityCount. **[$severity]** $($issue.RuleName) - $($issue.FindingCount) affected objects`n"
+                    }
+                }
+
+                $mdContent += @"
+
+---
+
+## Appendix
+
+### Scan Information
+
+- **Report Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- **PowerShell Version:** $($PSVersionTable.PSVersion.ToString())
+- **AD-Scout Version:** $(try { (Get-Module ADScout).Version.ToString() } catch { '1.0.0' })
+
+### Framework Coverage
+
+This assessment includes mappings to:
+- MITRE ATT&CK for Enterprise
+- CIS Microsoft Windows Server Benchmarks
+- DISA STIGs for Active Directory
+- NIST 800-53 Security Controls
+- ANSSI Active Directory Guidelines
+
+---
+
+*Report generated by [AD-Scout](https://github.com/mwilco03/AD-Scout) - Open Source Active Directory Security Assessment*
+"@
 
                 $mdContent | Out-File -FilePath $Path -Encoding UTF8
                 Write-Verbose "Markdown report saved to: $Path"
+                Write-Host "Markdown report saved to: $Path" -ForegroundColor Green
             }
         }
 
