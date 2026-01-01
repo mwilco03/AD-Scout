@@ -1,0 +1,81 @@
+# Build outputs
+/output/
+/dist/
+*.zip
+
+# Test results
+/testResults.xml
+/coverage.xml
+/TestResults/
+
+# IDE and editor files
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# VS Code local settings
+.vscode/*.log
+
+# PowerShell specific
+*.dll
+*.exe
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Report outputs
+*.html
+!src/ADScout/Templates/*.html
+*.json
+!src/ADScout/Schemas/*.json
+!.vscode/*.json
+!package.json
+*.csv
+*.sarif
+*.ndjson
+
+# Credentials and secrets
+*.cred
+*.credential
+*.secrets
+.env
+.env.local
+
+# Custom rules (user-specific)
+/MyCustomRules/
+/CustomRules/
+
+# Temporary files
+*.tmp
+*.temp
+~$*
+
+# Node modules (if any npm tooling added later)
+node_modules/
+
+# Documentation build
+/docs/*.md
+!/docs/.gitkeep
+
+# PSScriptAnalyzer
+PSScriptAnalyzerResults.xml
+
+# Coverage reports
+coverage/
+*.coverage
+
+# Backup files
+*.bak
+*.backup

@@ -1,0 +1,52 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "PowerShell: Launch Current File",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${file}",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "PowerShell: Interactive Session",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "",
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": false
+        },
+        {
+            "name": "PowerShell: Run Pester Tests",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "Invoke-Pester -Path '${workspaceFolder}/tests' -Output Detailed",
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
+        },
+        {
+            "name": "PowerShell: Run Current Test File",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "Invoke-Pester -Path '${file}' -Output Detailed",
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
+        },
+        {
+            "name": "PowerShell: Import Module and Debug",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "Import-Module '${workspaceFolder}/src/ADScout/ADScout.psd1' -Force",
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": false
+        },
+        {
+            "name": "PowerShell: Run Basic Scan",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "Import-Module '${workspaceFolder}/src/ADScout/ADScout.psd1' -Force; Get-ADScoutRule",
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
+        }
+    ]
+}

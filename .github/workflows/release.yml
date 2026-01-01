@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Publish to PSGallery
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $manifest = Import-PowerShellDataFile ./src/ADScout/ADScout.psd1
+          $manifestVersion = $manifest.ModuleVersion
+
+          if ($tag -ne $manifestVersion) {
+              throw "Tag version ($tag) does not match manifest version ($manifestVersion)"
+          }
+
+          Write-Host "Version validated: $tag"
+
+      - name: Run Tests
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser
+
+          $config = New-PesterConfiguration
+          $config.Run.Path = "./tests"
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = "Detailed"
+
+          Invoke-Pester -Configuration $config
+
+      - name: Build Module
+        shell: pwsh
+        run: |
+          ./build/Build-Module.ps1 -OutputPath ./output
+
+      - name: Publish to PSGallery
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          if (-not $env:PSGALLERY_API_KEY) {
+              Write-Warning "PSGALLERY_API_KEY not set, skipping publish"
+              return
+          }
+
+          Publish-Module -Path ./output/ADScout -NuGetApiKey $env:PSGALLERY_API_KEY -Repository PSGallery -Verbose
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            ./output/ADScout.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

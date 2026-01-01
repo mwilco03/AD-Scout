@@ -1,0 +1,65 @@
+@{
+    Severity = @('Error', 'Warning')
+
+    ExcludeRules = @(
+        # We handle ShouldProcess manually for some functions
+        'PSUseShouldProcessForStateChangingFunctions'
+    )
+
+    Rules = @{
+        PSAvoidUsingCmdletAliases = @{
+            Enable = $true
+        }
+
+        PSAvoidUsingPositionalParameters = @{
+            Enable = $true
+        }
+
+        PSProvideCommentHelp = @{
+            Enable = $true
+            Placement = 'begin'
+            ExportedOnly = $true
+        }
+
+        PSUseConsistentWhitespace = @{
+            Enable = $true
+            CheckOpenBrace = $true
+            CheckOpenParen = $true
+            CheckOperator = $true
+            CheckSeparator = $true
+            CheckInnerBrace = $false
+            CheckPipe = $true
+            CheckPipeForRedundantWhitespace = $true
+        }
+
+        PSUseConsistentIndentation = @{
+            Enable = $true
+            IndentationSize = 4
+            Kind = 'space'
+            PipelineIndentation = 'IncreaseIndentationForFirstPipeline'
+        }
+
+        PSAlignAssignmentStatement = @{
+            Enable = $true
+            CheckHashtable = $true
+        }
+
+        PSUseCorrectCasing = @{
+            Enable = $true
+        }
+
+        PSPlaceCloseBrace = @{
+            Enable = $true
+            NoEmptyLineBefore = $true
+            IgnoreOneLineBlock = $true
+            NewLineAfter = $true
+        }
+
+        PSPlaceOpenBrace = @{
+            Enable = $true
+            OnSameLine = $true
+            IgnoreOneLineBlock = $true
+            NewLineAfter = $true
+        }
+    }
+}

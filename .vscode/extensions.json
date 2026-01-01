@@ -1,0 +1,12 @@
+{
+    "recommendations": [
+        "ms-vscode.powershell",
+        "davidanson.vscode-markdownlint",
+        "streetsidesoftware.code-spell-checker",
+        "redhat.vscode-yaml",
+        "yzhang.markdown-all-in-one",
+        "pspester.pester-test",
+        "ms-azuretools.vscode-docker",
+        "github.vscode-github-actions"
+    ]
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/mwilco03/AD-Scout/schemas/config.schema.json",
+  "title": "AD-Scout Configuration Schema",
+  "description": "Schema for AD-Scout configuration file",
+  "type": "object",
+  "properties": {
+    "ParallelThrottleLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64,
+      "default": 4,
+      "description": "Maximum number of parallel operations"
+    },
+    "DefaultReporter": {
+      "type": "string",
+      "enum": ["Console", "HTML", "JSON", "CSV", "SARIF", "Markdown"],
+      "default": "Console",
+      "description": "Default output format for reports"
+    },
+    "RulePaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Additional paths to search for custom rules"
+    },
+    "CacheTTL": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400,
+      "default": 300,
+      "description": "Cache time-to-live in seconds"
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": ["Error", "Warning", "Info", "Verbose", "Debug"],
+      "default": "Warning",
+      "description": "Logging verbosity level"
+    },
+    "DefaultDomain": {
+      "type": "string",
+      "description": "Default domain to scan"
+    },
+    "DefaultServer": {
+      "type": "string",
+      "description": "Default domain controller to query"
+    },
+    "ExcludedRules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Rule IDs to exclude from scans by default"
+    },
+    "ReportOutputPath": {
+      "type": "string",
+      "description": "Default path for report output"
+    }
+  },
+  "additionalProperties": false
+}

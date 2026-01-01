@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AD-Scout Dashboard - {{Domain}}</title>
+    <style>
+        {{Styles}}
+
+        /* Dashboard-specific styles */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .dashboard-card {
+            background: var(--card-bg, #fff);
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .dashboard-card h3 {
+            margin-top: 0;
+            color: var(--heading-color, #333);
+            border-bottom: 2px solid var(--accent-color, #0078d4);
+            padding-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 3rem;
+            font-weight: bold;
+            color: var(--accent-color, #0078d4);
+        }
+
+        .metric-label {
+            color: var(--muted-color, #666);
+            font-size: 0.9rem;
+        }
+
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .trend-up { background: #fee; color: #c00; }
+        .trend-down { background: #efe; color: #0a0; }
+        .trend-stable { background: #eef; color: #00c; }
+
+        .chart-container {
+            height: 200px;
+            margin-top: 1rem;
+        }
+
+        .category-bar {
+            display: flex;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+
+        .category-name {
+            width: 140px;
+            font-size: 0.9rem;
+        }
+
+        .category-progress {
+            flex: 1;
+            height: 24px;
+            background: #eee;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .category-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        .category-score {
+            width: 60px;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .top-issues-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .top-issues-list li {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .top-issues-list li:last-child {
+            border-bottom: none;
+        }
+
+        .issue-severity {
+            width: 80px;
+        }
+
+        .issue-title {
+            flex: 1;
+        }
+
+        .issue-count {
+            font-weight: bold;
+            color: var(--muted-color, #666);
+        }
+
+        .refresh-info {
+            text-align: center;
+            color: var(--muted-color, #666);
+            font-size: 0.85rem;
+            margin-top: 2rem;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --card-bg: #1e1e1e;
+                --heading-color: #fff;
+                --muted-color: #aaa;
+            }
+            body {
+                background: #121212;
+                color: #fff;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="dashboard-header">
+            <h1>AD-Scout Security Dashboard</h1>
+            <div class="header-meta">
+                <span class="domain">{{Domain}}</span>
+                <span class="last-scan">Last Scan: {{LastScanTime}}</span>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            <!-- Overall Score Card -->
+            <div class="dashboard-card score-card">
+                <h3>Security Score</h3>
+                <div class="metric-value {{ScoreClass}}">{{OverallScore}}</div>
+                <div class="metric-label">out of 100</div>
+                {{#if ScoreTrend}}
+                <div class="trend-indicator {{TrendClass}}">
+                    {{TrendIcon}} {{ScoreTrend}} since last scan
+                </div>
+                {{/if}}
+            </div>
+
+            <!-- Findings Summary Card -->
+            <div class="dashboard-card findings-card">
+                <h3>Findings Summary</h3>
+                <div class="findings-breakdown">
+                    <div class="finding-stat critical">
+                        <span class="stat-value">{{CriticalCount}}</span>
+                        <span class="stat-label">Critical</span>
+                    </div>
+                    <div class="finding-stat high">
+                        <span class="stat-value">{{HighCount}}</span>
+                        <span class="stat-label">High</span>
+                    </div>
+                    <div class="finding-stat medium">
+                        <span class="stat-value">{{MediumCount}}</span>
+                        <span class="stat-label">Medium</span>
+                    </div>
+                    <div class="finding-stat low">
+                        <span class="stat-value">{{LowCount}}</span>
+                        <span class="stat-label">Low</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coverage Card -->
+            <div class="dashboard-card coverage-card">
+                <h3>Scan Coverage</h3>
+                <div class="coverage-stats">
+                    <div class="coverage-stat">
+                        <span class="stat-value">{{RulesEvaluated}}</span>
+                        <span class="stat-label">Rules Evaluated</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-value">{{ObjectsScanned}}</span>
+                        <span class="stat-label">Objects Scanned</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-value">{{ScanDuration}}</span>
+                        <span class="stat-label">Scan Duration</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Scores Section -->
+        <div class="dashboard-card full-width">
+            <h3>Category Scores</h3>
+            <div class="category-bars">
+                {{#each Categories}}
+                <div class="category-bar">
+                    <span class="category-name">{{this.Name}}</span>
+                    <div class="category-progress">
+                        <div class="category-fill" style="width: {{this.Percentage}}%; background: {{this.Color}};"></div>
+                    </div>
+                    <span class="category-score">{{this.Score}}%</span>
+                </div>
+                {{/each}}
+            </div>
+        </div>
+
+        <!-- Top Issues Section -->
+        <div class="dashboard-card full-width">
+            <h3>Top Priority Issues</h3>
+            <ul class="top-issues-list">
+                {{#each TopIssues}}
+                <li>
+                    <span class="issue-severity">
+                        <span class="severity-badge {{this.SeverityClass}}">{{this.Severity}}</span>
+                    </span>
+                    <span class="issue-title">{{this.Title}}</span>
+                    <span class="issue-count">{{this.AffectedCount}} affected</span>
+                </li>
+                {{/each}}
+            </ul>
+        </div>
+
+        <!-- Trend History (if available) -->
+        {{#if HasHistory}}
+        <div class="dashboard-card full-width">
+            <h3>Score History</h3>
+            <div class="chart-container" id="history-chart">
+                <!-- Chart rendered by JavaScript -->
+            </div>
+        </div>
+        {{/if}}
+
+        <div class="refresh-info">
+            <p>Dashboard generated: {{GeneratedTime}}</p>
+            <p>Run <code>Invoke-ADScoutScan | Show-ADScoutDashboard</code> to refresh</p>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh functionality (optional)
+        {{#if AutoRefresh}}
+        setTimeout(function() {
+            location.reload();
+        }, {{RefreshInterval}});
+        {{/if}}
+    </script>
+</body>
+</html>

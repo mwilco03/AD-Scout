@@ -1,0 +1,80 @@
+TOPIC
+    about_ADScout
+
+SHORT DESCRIPTION
+    PowerShell-native Active Directory security assessment framework.
+
+LONG DESCRIPTION
+    AD-Scout is a community-driven, extensible Active Directory security
+    assessment framework built entirely in PowerShell. It provides comprehensive
+    security analysis with customizable rules, multiple output formats, and
+    seamless integration into existing workflows.
+
+FEATURES
+    - PowerShell-first design with tab-completion and pipeline support
+    - Extensible rules with no compilation required
+    - Cross-version compatible (PowerShell 5.1 and 7.x)
+    - Multiple output formats (HTML, JSON, CSV, Console)
+    - Security framework mappings (MITRE ATT&CK, CIS, STIG)
+    - Remediation guidance for each finding
+
+QUICK START
+    # Import the module
+    Import-Module ADScout
+
+    # Run a security scan
+    Invoke-ADScoutScan
+
+    # Export results to HTML
+    Invoke-ADScoutScan | Export-ADScoutReport -Format HTML -Path ./report.html
+
+    # List available rules
+    Get-ADScoutRule
+
+    # Get remediation guidance
+    Get-ADScoutRemediation -RuleId S-PwdNeverExpires
+
+MAIN COMMANDS
+    Invoke-ADScoutScan      Run security assessment scan
+    Get-ADScoutRule         List available security rules
+    Export-ADScoutReport    Export results to various formats
+    Get-ADScoutRemediation  Get remediation scripts for findings
+    New-ADScoutRule         Create new rule from template
+    Register-ADScoutRule    Register custom rule paths
+    Set-ADScoutConfig       Configure module settings
+    Get-ADScoutConfig       View current configuration
+    Show-ADScoutDashboard   Display interactive dashboard
+
+RULE CATEGORIES
+    - Anomalies           Unusual configurations that may indicate compromise
+    - StaleObjects        Dormant accounts, unused computers, orphaned objects
+    - PrivilegedAccounts  Excessive privileges, dangerous delegations
+    - Trusts              Insecure trust relationships
+
+CUSTOM RULES
+    AD-Scout supports custom rules that can be added without modifying
+    the module. See CONTRIBUTING.md for the rule format.
+
+    # Create a new rule
+    New-ADScoutRule -Name "MyRule" -Category Anomalies -Path ./MyRules
+
+    # Register custom rule path
+    Register-ADScoutRule -Path ./MyRules
+
+CONFIGURATION
+    Configuration is stored in ~/.adscout/config.json
+
+    # View configuration
+    Get-ADScoutConfig
+
+    # Set configuration
+    Set-ADScoutConfig -ParallelThrottleLimit 8 -Persist
+
+SEE ALSO
+    Get-Help Invoke-ADScoutScan
+    Get-Help Get-ADScoutRule
+    Get-Help Export-ADScoutReport
+    https://github.com/mwilco03/AD-Scout
+
+KEYWORDS
+    ActiveDirectory Security Audit Assessment Compliance MITRE CIS
