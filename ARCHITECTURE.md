@@ -13,6 +13,7 @@ src/ADScout/
 │   ├── Collectors/        # AD data gathering
 │   ├── Scanners/          # Analysis engines
 │   ├── Compatibility/     # Cross-version support
+│   ├── Statistics/        # Statistical analysis for anomaly detection
 │   └── Helpers/           # Utility functions
 ├── Rules/                 # Security rules by category
 ├── Reporters/             # Output formatters
@@ -134,6 +135,88 @@ function Get-ADScoutUserData {
 | `Get-ADScoutTrustData` | Domain trusts |
 | `Get-ADScoutGPOData` | Group Policy Objects |
 | `Get-ADScoutCertificateData` | PKI certificates |
+
+## Statistics
+
+Statistical helper functions for frequency-based anomaly detection. These functions calculate metrics used by Anomaly rules to identify outliers.
+
+### Statistical Functions
+
+| Function | Purpose |
+|----------|---------|
+| `Get-ADScoutStatistics` | Calculate mean, stddev, quartiles, IQR for a dataset |
+| `Get-ADScoutZScore` | Calculate Z-scores and identify outliers |
+| `Get-ADScoutIQROutliers` | Identify outliers using Interquartile Range method |
+| `Get-ADScoutPeerBaseline` | Group objects by OU for peer comparison |
+
+### Get-ADScoutStatistics
+
+Returns comprehensive statistics for a numeric dataset:
+
+```powershell
+$stats = Get-ADScoutStatistics -Values @(1, 2, 3, 4, 5, 100)
+
+# Returns:
+@{
+    Count    = 6
+    Mean     = 19.17
+    Median   = 3.5
+    StdDev   = 38.89
+    Min      = 1
+    Max      = 100
+    Q1       = 2        # 25th percentile
+    Q3       = 5        # 75th percentile
+    IQR      = 3        # Interquartile range (Q3 - Q1)
+}
+```
+
+### Get-ADScoutZScore
+
+Calculates Z-scores and filters outliers:
+
+```powershell
+# Get all users with group membership Z-score > 2
+$groupCounts = $ADData.Users | ForEach-Object { @($_.MemberOf).Count }
+$outliers = Get-ADScoutZScore -Values $groupCounts -Threshold 2.0
+
+# Returns objects where Z-score exceeds threshold
+```
+
+### Get-ADScoutIQROutliers
+
+More robust outlier detection for skewed distributions:
+
+```powershell
+# IQR method: outlier if value > Q3 + (1.5 * IQR)
+$outliers = Get-ADScoutIQROutliers -Values $groupCounts -Multiplier 1.5
+```
+
+### Usage in Rules
+
+```powershell
+# Example: A-ExcessiveGroupMembership rule
+ScriptBlock = {
+    param($ADData)
+
+    $userGroups = $ADData.Users | ForEach-Object {
+        @{ User = $_; GroupCount = @($_.MemberOf).Count }
+    }
+
+    $stats = Get-ADScoutStatistics -Values ($userGroups.GroupCount)
+
+    $userGroups | Where-Object {
+        $zscore = ($_.GroupCount - $stats.Mean) / $stats.StdDev
+        $zscore -gt 2.0
+    } | ForEach-Object {
+        [PSCustomObject]@{
+            SamAccountName = $_.User.SamAccountName
+            GroupCount     = $_.GroupCount
+            ZScore         = [math]::Round($zscore, 2)
+            EnvironmentMean = [math]::Round($stats.Mean, 1)
+        }
+    }
+}
+```
 
 ## Rule Engine
 

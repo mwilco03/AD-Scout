@@ -62,6 +62,7 @@ function Get-ADScoutUserData {
         'PasswordLastSet'
         'LastLogonDate'
         'LastLogonTimestamp'
+        'LogonCount'
         'WhenCreated'
         'WhenChanged'
         'MemberOf'
@@ -122,6 +123,7 @@ function Get-ADScoutUserData {
             PasswordNotRequired      = $_.PasswordNotRequired
             PasswordLastSet          = $_.PasswordLastSet
             LastLogonDate            = $_.LastLogonDate
+            LogonCount               = $_.LogonCount
             WhenCreated              = $_.WhenCreated
             WhenChanged              = $_.WhenChanged
             MemberOf                 = $_.MemberOf
@@ -199,7 +201,7 @@ function Get-ADScoutUserDataFallback {
         $ldapProperties = @(
             'samaccountname', 'distinguishedname', 'userprincipalname',
             'displayname', 'useraccountcontrol', 'pwdlastset',
-            'lastlogon', 'lastlogontimestamp', 'whencreated', 'whenchanged',
+            'lastlogon', 'lastlogontimestamp', 'logoncount', 'whencreated', 'whenchanged',
             'memberof', 'admincount', 'serviceprincipalname',
             'msds-allowedtodelegateto', 'description', 'sidhistory',
             'primarygroupid', 'objectsid'
@@ -235,6 +237,7 @@ function Get-ADScoutUserDataFallback {
                 LastLogonDate            = if ($props['lastlogontimestamp'][0]) {
                     [DateTime]::FromFileTime([Int64]$props['lastlogontimestamp'][0])
                 } else { $null }
+                LogonCount               = $props['logoncount'][0]
                 WhenCreated              = $props['whencreated'][0]
                 WhenChanged              = $props['whenchanged'][0]
                 MemberOf                 = @($props['memberof'])
