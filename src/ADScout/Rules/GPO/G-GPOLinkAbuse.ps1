@@ -32,7 +32,7 @@
 
     MITRE = @{
         Tactics    = @('TA0003', 'TA0005')  # Persistence, Defense Evasion
-        Techniques = @('T1484.001', 'T1484.002')  # Group Policy Modification, Domain Trust Modification
+        Techniques = @('T1484.001')  # Group Policy Modification
     }
 
     CIS   = @('5.3')
