@@ -21,6 +21,7 @@
     CIS   = @('5.1')
     STIG  = @('V-36432')
     ANSSI = @('vuln1_intruders_bad_admincount')
+    NIST  = @('AC-3', 'SI-7')
 
     Scoring = @{
         Type = 'TriggerOnPresence'

@@ -22,6 +22,7 @@
     CIS   = @('1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5')
     STIG  = @('V-63413', 'V-63417', 'V-63421')
     ANSSI = @('vuln1_password_policy')
+    NIST  = @('CM-2', 'CM-6', 'IA-5(1)')
 
     Scoring = @{
         Type = 'TriggerOnPresence'

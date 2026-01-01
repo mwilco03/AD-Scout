@@ -21,6 +21,7 @@
     CIS   = @('5.12')
     STIG  = @('V-36444')
     ANSSI = @('vuln1_kerberoasting')
+    NIST  = @('IA-2', 'IA-5(1)')
 
     Scoring = @{
         Type      = 'PerDiscovery'

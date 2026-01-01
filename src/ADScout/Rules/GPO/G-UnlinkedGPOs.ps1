@@ -20,6 +20,7 @@
     CIS   = @('5.17')
     STIG  = @()
     ANSSI = @()
+    NIST  = @('CM-2')
 
     Scoring = @{
         Type      = 'PerDiscovery'

@@ -22,6 +22,7 @@
     CIS   = @('5.1')
     STIG  = @('V-63357')
     ANSSI = @('vuln1_obsolete_os')
+    NIST  = @('CM-8', 'SI-2')
 
     Scoring = @{
         Type = 'PerFinding'

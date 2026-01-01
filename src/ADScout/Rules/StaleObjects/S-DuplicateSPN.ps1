@@ -22,6 +22,7 @@
     CIS   = @('5.5')
     STIG  = @()
     ANSSI = @('vuln2_duplicate_spn')
+    NIST  = @('CM-8', 'IA-4')
 
     Scoring = @{
         Type = 'PerFinding'

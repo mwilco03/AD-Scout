@@ -22,6 +22,7 @@
     CIS   = @('5.27')
     STIG  = @('V-36437')
     ANSSI = @('vuln2_sid_history_orphan')
+    NIST  = @('IA-4')
 
     Scoring = @{
         Type = 'PerFinding'

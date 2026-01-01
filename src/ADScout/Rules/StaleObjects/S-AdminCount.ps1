@@ -22,6 +22,7 @@
     CIS   = @('5.30')
     STIG  = @()
     ANSSI = @('vuln3_admincount')
+    NIST  = @('AC-2')
 
     Scoring = @{
         Type = 'PerFinding'

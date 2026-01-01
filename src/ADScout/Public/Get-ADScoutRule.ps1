@@ -28,6 +28,14 @@ function Get-ADScoutRule {
         Get-ADScoutRule -Id "S-PwdNeverExpires"
         Returns the specific rule by ID.
 
+    .EXAMPLE
+        Get-ADScoutRule -NIST "IA-5"
+        Returns all rules mapped to NIST 800-53 control IA-5.
+
+    .EXAMPLE
+        Get-ADScoutRule -NIST "AC-2", "AC-6"
+        Returns all rules mapped to NIST controls AC-2 or AC-6.
+
     .OUTPUTS
         PSCustomObject[]
         Collection of rule definitions.
@@ -44,6 +52,9 @@ function Get-ADScoutRule {
         [Parameter()]
         [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI')]
         [string[]]$Category,
+
+        [Parameter()]
+        [string[]]$NIST,
 
         [Parameter()]
         [string[]]$Path
@@ -139,10 +150,11 @@ function Get-ADScoutRule {
                             @()
                         }
 
-                        # Normalize CIS/STIG/ANSSI (ensure arrays)
+                        # Normalize CIS/STIG/ANSSI/NIST (ensure arrays)
                         $ruleCIS = if ($rule.CIS -is [array]) { $rule.CIS } else { @($rule.CIS) | Where-Object { $_ } }
                         $ruleSTIG = if ($rule.STIG -is [array]) { $rule.STIG } else { @($rule.STIG) | Where-Object { $_ } }
                         $ruleANSSI = if ($rule.ANSSI -is [array]) { $rule.ANSSI } else { @($rule.ANSSI) | Where-Object { $_ } }
+                        $ruleNIST = if ($rule.NIST -is [array]) { $rule.NIST } else { @($rule.NIST) | Where-Object { $_ } }
 
                         # Normalize Description
                         $ruleDescription = $rule.Description
@@ -188,6 +200,7 @@ function Get-ADScoutRule {
                             CIS           = $ruleCIS
                             STIG          = $ruleSTIG
                             ANSSI         = $ruleANSSI
+                            NIST          = $ruleNIST
                             ScriptBlock   = $ruleScriptBlock
                             DetailProperties = $rule.DetailProperties
                             DetailFormat  = $rule.DetailFormat
@@ -221,6 +234,25 @@ function Get-ADScoutRule {
         # Filter by Category if specified
         if ($Category) {
             $rules = $rules | Where-Object { $_.Category -in $Category }
+        }
+
+        # Filter by NIST control if specified
+        if ($NIST) {
+            $rules = $rules | Where-Object {
+                $ruleNISTControls = $_.NIST
+                $matchFound = $false
+                foreach ($control in $NIST) {
+                    # Support both exact match and prefix match (e.g., "AC-2" matches "AC-2(1)")
+                    foreach ($ruleControl in $ruleNISTControls) {
+                        if ($ruleControl -eq $control -or $ruleControl -like "$control*" -or $ruleControl -like "$control(*") {
+                            $matchFound = $true
+                            break
+                        }
+                    }
+                    if ($matchFound) { break }
+                }
+                $matchFound
+            }
         }
 
         # Remove duplicates (later paths override earlier for same ID)

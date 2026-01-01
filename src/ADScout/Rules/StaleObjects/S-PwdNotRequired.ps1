@@ -21,6 +21,7 @@
     CIS   = @('5.1.3')
     STIG  = @('V-36453')
     ANSSI = @('vuln1_pwd_not_required')
+    NIST  = @('IA-2', 'IA-5(1)')
 
     Scoring = @{
         Type      = 'PerDiscovery'

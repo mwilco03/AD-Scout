@@ -22,6 +22,7 @@
     CIS   = @('17.1', '17.2', '17.3', '17.4', '17.5', '17.6', '17.7', '17.8', '17.9')
     STIG  = @('V-63449', 'V-63453', 'V-63457')
     ANSSI = @('vuln1_audit_policy')
+    NIST  = @('AU-2', 'AU-3', 'AU-6', 'AU-12', 'SI-4')
 
     Scoring = @{
         Type = 'TriggerOnPresence'

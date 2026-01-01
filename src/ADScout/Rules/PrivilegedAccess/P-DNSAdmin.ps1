@@ -22,6 +22,7 @@
     CIS   = @('5.4')
     STIG  = @('V-36439')
     ANSSI = @('vuln1_dnsadmin')
+    NIST  = @('AC-5', 'AC-6(5)')
 
     Scoring = @{
         Type = 'PerFinding'

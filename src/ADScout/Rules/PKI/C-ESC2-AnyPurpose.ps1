@@ -22,6 +22,7 @@
     CIS   = @()
     STIG  = @()
     ANSSI = @('vuln1_adcs_esc2')
+    NIST  = @('SC-12')
 
     Scoring = @{
         Type = 'PerFinding'

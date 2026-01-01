@@ -21,6 +21,7 @@
     CIS   = @('5.2', '5.3')
     STIG  = @('V-36433')
     ANSSI = @('vuln1_privileged_members')
+    NIST  = @('AC-2(7)', 'AC-5', 'AC-6')
 
     Scoring = @{
         Type      = 'PerDiscovery'

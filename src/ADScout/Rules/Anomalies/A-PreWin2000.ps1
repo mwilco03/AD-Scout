@@ -22,6 +22,7 @@
     CIS   = @('2.3.10.2')
     STIG  = @('V-63597')
     ANSSI = @('vuln1_prewin2000')
+    NIST  = @('AC-3', 'CM-6', 'CM-7')
 
     Scoring = @{
         Type = 'TriggerOnPresence'
