@@ -75,6 +75,17 @@ function Get-ADScoutUserData {
         'SIDHistory'
         'PrimaryGroupID'
         'ObjectSID'
+        # Email-related properties
+        'Mail'
+        'EmailAddress'
+        'ProxyAddresses'
+        'mailNickname'
+        # Account type indicators
+        'Department'
+        'Manager'
+        'Title'
+        'EmployeeID'
+        'EmployeeType'
     )
 
     if (-not $Properties) {
@@ -112,6 +123,11 @@ function Get-ADScoutUserData {
 
     # Normalize to PSCustomObject for consistency
     $normalizedUsers = $users | ForEach-Object {
+        # Determine email address (Mail takes precedence, then EmailAddress)
+        $emailAddress = if ($_.Mail) { $_.Mail }
+                       elseif ($_.EmailAddress) { $_.EmailAddress }
+                       else { $null }
+
         [PSCustomObject]@{
             SamAccountName           = $_.SamAccountName
             DistinguishedName        = $_.DistinguishedName
@@ -135,6 +151,18 @@ function Get-ADScoutUserData {
             SIDHistory               = $_.SIDHistory
             PrimaryGroupID           = $_.PrimaryGroupID
             ObjectSID                = $_.ObjectSID
+            # Email-related properties
+            Mail                     = $_.Mail
+            EmailAddress             = $emailAddress
+            ProxyAddresses           = $_.ProxyAddresses
+            MailNickname             = $_.mailNickname
+            HasEmail                 = [bool]$emailAddress
+            # Account type indicators
+            Department               = $_.Department
+            Manager                  = $_.Manager
+            Title                    = $_.Title
+            EmployeeID               = $_.EmployeeID
+            EmployeeType             = $_.EmployeeType
         }
     }
 
@@ -202,7 +230,11 @@ function Get-ADScoutUserDataFallback {
             'lastlogon', 'lastlogontimestamp', 'whencreated', 'whenchanged',
             'memberof', 'admincount', 'serviceprincipalname',
             'msds-allowedtodelegateto', 'description', 'sidhistory',
-            'primarygroupid', 'objectsid'
+            'primarygroupid', 'objectsid',
+            # Email-related properties
+            'mail', 'proxyaddresses', 'mailnickname',
+            # Account type indicators
+            'department', 'manager', 'title', 'employeeid', 'employeetype'
         )
 
         foreach ($prop in $ldapProperties) {
@@ -248,6 +280,16 @@ function Get-ADScoutUserDataFallback {
                 SIDHistory               = @($props['sidhistory'])
                 PrimaryGroupID           = $props['primarygroupid'][0]
                 ObjectSID                = (New-Object Security.Principal.SecurityIdentifier($props['objectsid'][0], 0)).Value
+                # Email-related properties
+                Mail                     = [string]$props['mail'][0]
+                ProxyAddresses           = @($props['proxyaddresses'])
+                MailNickname             = [string]$props['mailnickname'][0]
+                # Account type indicators
+                Department               = [string]$props['department'][0]
+                Manager                  = [string]$props['manager'][0]
+                Title                    = [string]$props['title'][0]
+                EmployeeID               = [string]$props['employeeid'][0]
+                EmployeeType             = [string]$props['employeetype'][0]
             }
         }
 
