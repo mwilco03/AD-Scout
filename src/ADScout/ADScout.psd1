@@ -11,16 +11,36 @@
     CompatiblePSEditions = @('Desktop', 'Core')
 
     FunctionsToExport = @(
+        # Core scanning
         'Invoke-ADScoutScan'
         'Get-ADScoutRule'
         'New-ADScoutRule'
         'Register-ADScoutRule'
+
+        # Reporting
         'Export-ADScoutReport'
         'Export-ADScoutNISTReport'
         'Get-ADScoutRemediation'
+        'Show-ADScoutDashboard'
+
+        # Configuration
         'Set-ADScoutConfig'
         'Get-ADScoutConfig'
-        'Show-ADScoutDashboard'
+
+        # Microsoft Graph / Entra ID
+        'Connect-ADScoutGraph'
+        'Disconnect-ADScoutGraph'
+        'Test-ADScoutGraphConnection'
+
+        # Baseline storage
+        'Export-ADScoutBaseline'
+        'Import-ADScoutBaseline'
+        'Compare-ADScoutBaseline'
+
+        # CSV helpers
+        'ConvertFrom-ADScoutCSV'
+        'ConvertTo-ADScoutCSV'
+        'Test-ADScoutCSVEncoding'
     )
 
     CmdletsToExport   = @()
@@ -29,7 +49,7 @@
 
     PrivateData       = @{
         PSData = @{
-            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53')
+            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53', 'EntraID', 'AzureAD', 'MicrosoftGraph')
             LicenseUri   = 'https://github.com/mwilco03/AD-Scout/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/mwilco03/AD-Scout'
             IconUri      = ''
