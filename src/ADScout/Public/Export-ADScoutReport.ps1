@@ -11,7 +11,7 @@ function Export-ADScoutReport {
         The scan results to export. Accepts pipeline input from Invoke-ADScoutScan.
 
     .PARAMETER Format
-        The output format. Valid values: HTML, JSON, CSV, SARIF, Markdown, Console.
+        The output format. Valid values: HTML, JSON, CSV, SARIF, BloodHound, Markdown, Console.
 
     .PARAMETER Path
         The output file path. Required for file-based formats (HTML, JSON, CSV, SARIF, Markdown).
@@ -50,7 +50,7 @@ function Export-ADScoutReport {
         [PSCustomObject[]]$Results,
 
         [Parameter(Mandatory)]
-        [ValidateSet('HTML', 'JSON', 'CSV', 'SARIF', 'Markdown', 'Console')]
+        [ValidateSet('HTML', 'JSON', 'CSV', 'SARIF', 'BloodHound', 'Markdown', 'Console')]
         [string]$Format,
 
         [Parameter()]
@@ -189,7 +189,139 @@ function Export-ADScoutReport {
             }
 
             'SARIF' {
-                # SARIF format for DevSecOps integration
+                # Enhanced SARIF format for DevSecOps integration
+                # SARIF 2.1.0 specification: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
+
+                $moduleVersion = try { (Get-Module ADScout).Version.ToString() } catch { '1.0.0' }
+
+                # Build comprehensive rule definitions
+                $sarifRules = $allResults | ForEach-Object {
+                    $result = $_
+
+                    # Map score to SARIF security-severity (0.0-10.0 scale)
+                    $securitySeverity = [math]::Min(10.0, [math]::Round($result.Score / 10, 1))
+
+                    # Build help URI from references if available
+                    $helpUri = if ($result.References -and $result.References.Count -gt 0) {
+                        $result.References[0]
+                    } else {
+                        "https://github.com/mwilco03/AD-Scout/blob/main/docs/rules/$($result.RuleId).md"
+                    }
+
+                    # Build tags for filtering
+                    $tags = @($result.Category)
+                    if ($result.MITRE) { $tags += $result.MITRE | ForEach-Object { "mitre:$_" } }
+                    if ($result.CIS) { $tags += $result.CIS | ForEach-Object { "cis:$_" } }
+                    if ($result.NIST) { $tags += $result.NIST | ForEach-Object { "nist:$_" } }
+                    if ($result.STIG) { $tags += $result.STIG | ForEach-Object { "stig:$_" } }
+
+                    @{
+                        id = $result.RuleId
+                        name = $result.RuleName
+                        shortDescription = @{ text = $result.RuleName }
+                        fullDescription = @{ text = $result.Description }
+                        helpUri = $helpUri
+                        help = @{
+                            text = if ($result.TechnicalExplanation) { $result.TechnicalExplanation } else { $result.Description }
+                            markdown = "## $($result.RuleName)`n`n$($result.Description)"
+                        }
+                        defaultConfiguration = @{
+                            level = if ($result.Score -ge 50) { 'error' } elseif ($result.Score -ge 20) { 'warning' } else { 'note' }
+                        }
+                        properties = @{
+                            category = $result.Category
+                            'security-severity' = $securitySeverity.ToString()
+                            precision = 'high'
+                            tags = $tags
+                            mitre = $result.MITRE
+                            cis = $result.CIS
+                            nist = $result.NIST
+                            stig = $result.STIG
+                        }
+                    }
+                }
+
+                # Build individual results with detailed findings
+                $sarifResults = @()
+                foreach ($result in $allResults) {
+                    # Create one SARIF result per finding for granular reporting
+                    if ($result.Findings -and $result.Findings.Count -gt 0) {
+                        foreach ($finding in $result.Findings) {
+                            # Extract identifier from finding
+                            $identifier = if ($finding.SamAccountName) { $finding.SamAccountName }
+                                         elseif ($finding.UserPrincipalName) { $finding.UserPrincipalName }
+                                         elseif ($finding.Name) { $finding.Name }
+                                         elseif ($finding.DNSHostName) { $finding.DNSHostName }
+                                         elseif ($finding.DisplayName) { $finding.DisplayName }
+                                         else { 'Unknown' }
+
+                            # Build location - use DN if available, otherwise logical location
+                            $location = if ($finding.DistinguishedName) {
+                                @{
+                                    physicalLocation = @{
+                                        artifactLocation = @{
+                                            uri = $finding.DistinguishedName
+                                            uriBaseId = 'LDAP'
+                                        }
+                                    }
+                                    logicalLocations = @(
+                                        @{
+                                            name = $identifier
+                                            kind = $result.Category
+                                            fullyQualifiedName = $finding.DistinguishedName
+                                        }
+                                    )
+                                }
+                            } else {
+                                @{
+                                    logicalLocations = @(
+                                        @{
+                                            name = $identifier
+                                            kind = $result.Category
+                                        }
+                                    )
+                                }
+                            }
+
+                            $sarifResults += @{
+                                ruleId = $result.RuleId
+                                ruleIndex = [array]::IndexOf(($allResults.RuleId), $result.RuleId)
+                                level = if ($result.Score -ge 50) { 'error' } elseif ($result.Score -ge 20) { 'warning' } else { 'note' }
+                                message = @{
+                                    text = "$($result.RuleName): $identifier"
+                                    markdown = "**$($result.RuleName)**`n`nAffected: ``$identifier```n`n$($result.Description)"
+                                }
+                                locations = @($location)
+                                partialFingerprints = @{
+                                    'primaryLocationLineHash' = [System.BitConverter]::ToString(
+                                        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                                            [System.Text.Encoding]::UTF8.GetBytes("$($result.RuleId):$identifier")
+                                        )
+                                    ).Replace('-', '').Substring(0, 16).ToLower()
+                                }
+                                properties = @{
+                                    score = $result.Score
+                                    finding = $finding
+                                }
+                            }
+                        }
+                    } else {
+                        # Rule with no specific findings (summary result)
+                        $sarifResults += @{
+                            ruleId = $result.RuleId
+                            ruleIndex = [array]::IndexOf(($allResults.RuleId), $result.RuleId)
+                            level = if ($result.Score -ge 50) { 'error' } elseif ($result.Score -ge 20) { 'warning' } else { 'note' }
+                            message = @{
+                                text = "$($result.RuleName): $($result.FindingCount) findings"
+                            }
+                            properties = @{
+                                score = $result.Score
+                                findingCount = $result.FindingCount
+                            }
+                        }
+                    }
+                }
+
                 $sarifOutput = @{
                     '$schema' = 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json'
                     version = '2.1.0'
@@ -198,39 +330,173 @@ function Export-ADScoutReport {
                             tool = @{
                                 driver = @{
                                     name = 'AD-Scout'
-                                    version = (Get-Module ADScout).Version.ToString()
+                                    semanticVersion = $moduleVersion
                                     informationUri = 'https://github.com/mwilco03/AD-Scout'
-                                    rules = $allResults | ForEach-Object {
-                                        @{
-                                            id = $_.RuleId
-                                            name = $_.RuleName
-                                            shortDescription = @{ text = $_.Description }
-                                            properties = @{
-                                                category = $_.Category
-                                                mitre = $_.MITRE
-                                            }
-                                        }
-                                    }
+                                    organization = 'AD-Scout Contributors'
+                                    rules = $sarifRules
                                 }
                             }
-                            results = $allResults | ForEach-Object {
-                                $result = $_
+                            invocations = @(
                                 @{
-                                    ruleId = $result.RuleId
-                                    level = if ($result.Score -ge 50) { 'error' } elseif ($result.Score -ge 20) { 'warning' } else { 'note' }
-                                    message = @{ text = "$($result.RuleName): $($result.FindingCount) findings" }
-                                    properties = @{
-                                        score = $result.Score
-                                        findingCount = $result.FindingCount
-                                    }
+                                    executionSuccessful = $true
+                                    endTimeUtc = (Get-Date).ToUniversalTime().ToString('o')
                                 }
-                            }
+                            )
+                            results = $sarifResults
+                            columnKind = 'utf16CodeUnits'
                         }
                     )
                 }
 
-                $sarifOutput | ConvertTo-Json -Depth 20 | Out-File -FilePath $Path -Encoding UTF8
+                $sarifOutput | ConvertTo-Json -Depth 30 | Out-File -FilePath $Path -Encoding UTF8
                 Write-Verbose "SARIF report saved to: $Path"
+                Write-Host "SARIF report saved to: $Path" -ForegroundColor Green
+            }
+
+            'BloodHound' {
+                # BloodHound-compatible JSON export for graph-based analysis
+                # Creates nodes and edges compatible with BloodHound CE/Legacy import
+
+                $bloodhoundData = @{
+                    meta = @{
+                        type = 'adscout'
+                        version = 5
+                        count = 0
+                    }
+                    data = @()
+                }
+
+                # Track created nodes to avoid duplicates
+                $createdNodes = @{}
+
+                foreach ($result in $allResults) {
+                    if (-not $result.Findings -or $result.Findings.Count -eq 0) { continue }
+
+                    foreach ($finding in $result.Findings) {
+                        # Determine object type and properties based on finding content
+                        $objectId = $null
+                        $objectType = $null
+                        $objectName = $null
+                        $properties = @{}
+
+                        # User objects
+                        if ($finding.SamAccountName -or $finding.UserPrincipalName) {
+                            $objectType = 'User'
+                            $objectId = if ($finding.ObjectGUID) { $finding.ObjectGUID }
+                                        elseif ($finding.Id) { $finding.Id }
+                                        else { [guid]::NewGuid().ToString() }
+                            $objectName = if ($finding.SamAccountName) { $finding.SamAccountName } else { $finding.UserPrincipalName }
+
+                            $properties = @{
+                                name = $objectName.ToUpper()
+                                displayname = $finding.DisplayName
+                                samaccountname = $finding.SamAccountName
+                                userprincipalname = $finding.UserPrincipalName
+                                enabled = if ($null -ne $finding.Enabled) { $finding.Enabled } elseif ($null -ne $finding.AccountEnabled) { $finding.AccountEnabled } else { $true }
+                                pwdneverexpires = $finding.PasswordNeverExpires
+                                lastlogon = $finding.LastLogonDate
+                                distinguishedname = $finding.DistinguishedName
+                                adscout_findings = @($result.RuleId)
+                                adscout_score = $result.Score
+                            }
+                        }
+                        # Computer objects
+                        elseif ($finding.DNSHostName -or ($finding.Name -and $finding.OperatingSystem)) {
+                            $objectType = 'Computer'
+                            $objectId = if ($finding.ObjectGUID) { $finding.ObjectGUID } else { [guid]::NewGuid().ToString() }
+                            $objectName = if ($finding.DNSHostName) { $finding.DNSHostName } else { $finding.Name }
+
+                            $properties = @{
+                                name = $objectName.ToUpper()
+                                displayname = $finding.DisplayName
+                                operatingsystem = $finding.OperatingSystem
+                                enabled = $finding.Enabled
+                                lastlogon = $finding.LastLogonDate
+                                distinguishedname = $finding.DistinguishedName
+                                adscout_findings = @($result.RuleId)
+                                adscout_score = $result.Score
+                            }
+                        }
+                        # Group objects
+                        elseif ($finding.GroupCategory -or ($finding.Name -and $finding.Members)) {
+                            $objectType = 'Group'
+                            $objectId = if ($finding.ObjectGUID) { $finding.ObjectGUID } else { [guid]::NewGuid().ToString() }
+                            $objectName = $finding.Name
+
+                            $properties = @{
+                                name = $objectName.ToUpper()
+                                displayname = $finding.DisplayName
+                                distinguishedname = $finding.DistinguishedName
+                                adscout_findings = @($result.RuleId)
+                                adscout_score = $result.Score
+                            }
+                        }
+                        # GPO objects
+                        elseif ($finding.GpoId -or $finding.GPODisplayName) {
+                            $objectType = 'GPO'
+                            $objectId = if ($finding.GpoId) { $finding.GpoId } else { [guid]::NewGuid().ToString() }
+                            $objectName = if ($finding.GPODisplayName) { $finding.GPODisplayName } else { $finding.Name }
+
+                            $properties = @{
+                                name = $objectName
+                                gpcpath = $finding.GpoPath
+                                distinguishedname = $finding.DistinguishedName
+                                adscout_findings = @($result.RuleId)
+                                adscout_score = $result.Score
+                            }
+                        }
+                        # Generic/Entra ID objects
+                        else {
+                            $objectType = 'Base'
+                            $objectId = if ($finding.Id) { $finding.Id } else { [guid]::NewGuid().ToString() }
+                            $objectName = if ($finding.DisplayName) { $finding.DisplayName }
+                                          elseif ($finding.Name) { $finding.Name }
+                                          else { $objectId }
+
+                            $properties = @{
+                                name = $objectName
+                                adscout_rule = $result.RuleId
+                                adscout_category = $result.Category
+                                adscout_findings = @($result.RuleId)
+                                adscout_score = $result.Score
+                            }
+
+                            # Add all finding properties for Entra ID objects
+                            if ($result.Category -eq 'EntraID') {
+                                $properties['isentraobject'] = $true
+                                $finding.PSObject.Properties | ForEach-Object {
+                                    if ($_.Name -notin @('adscout_findings', 'adscout_score', 'adscout_rule', 'adscout_category')) {
+                                        $properties[$_.Name.ToLower()] = $_.Value
+                                    }
+                                }
+                            }
+                        }
+
+                        # Create or update node
+                        if ($objectId -and -not $createdNodes.ContainsKey($objectId)) {
+                            $bloodhoundData.data += @{
+                                ObjectIdentifier = $objectId
+                                ObjectType = $objectType
+                                Properties = $properties
+                            }
+                            $createdNodes[$objectId] = $true
+                        }
+                        elseif ($objectId -and $createdNodes.ContainsKey($objectId)) {
+                            # Update existing node with additional finding
+                            $existingNode = $bloodhoundData.data | Where-Object { $_.ObjectIdentifier -eq $objectId }
+                            if ($existingNode -and $existingNode.Properties.adscout_findings) {
+                                $existingNode.Properties.adscout_findings += $result.RuleId
+                                $existingNode.Properties.adscout_score = [math]::Max($existingNode.Properties.adscout_score, $result.Score)
+                            }
+                        }
+                    }
+                }
+
+                $bloodhoundData.meta.count = $bloodhoundData.data.Count
+
+                $bloodhoundData | ConvertTo-Json -Depth 20 | Out-File -FilePath $Path -Encoding UTF8
+                Write-Verbose "BloodHound report saved to: $Path"
+                Write-Host "BloodHound report saved to: $Path ($($bloodhoundData.data.Count) objects)" -ForegroundColor Green
             }
 
             'Markdown' {
