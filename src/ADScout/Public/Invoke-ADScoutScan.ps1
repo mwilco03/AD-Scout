@@ -20,8 +20,12 @@ function Invoke-ADScoutScan {
         Credentials to use for AD queries. If not specified, uses current user context.
 
     .PARAMETER Category
-        Filter rules by category. Valid values: Anomalies, StaleObjects, PrivilegedAccounts, Trusts, All.
+        Filter rules by category. Valid values: Anomalies, StaleObjects, PrivilegedAccounts, Trusts, EntraID, All.
         Defaults to 'All'.
+
+    .PARAMETER IncludeEntraID
+        Include Entra ID (Azure AD) data collection and rules. Requires active Microsoft Graph connection
+        via Connect-ADScoutGraph. If not connected, Entra ID rules will be skipped gracefully.
 
     .PARAMETER RuleId
         Specific rule IDs to execute. Accepts an array of rule IDs.
@@ -71,8 +75,11 @@ function Invoke-ADScoutScan {
         [PSCredential]$Credential,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'All')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'All')]
         [string[]]$Category = 'All',
+
+        [Parameter()]
+        [switch]$IncludeEntraID,
 
         [Parameter()]
         [string[]]$RuleId,
@@ -140,6 +147,32 @@ function Invoke-ADScoutScan {
             Domain       = $Domain
             Server       = $Server
             ScanTime     = $startTime
+        }
+
+        Write-Verbose "AD data collection complete"
+
+        # Collect Entra ID data if requested or EntraID category is specified
+        $entraConnected = Test-ADScoutGraphConnection
+        $collectEntra = $IncludeEntraID -or ($Category -contains 'EntraID') -or ($Category -contains 'All')
+
+        if ($collectEntra) {
+            if ($entraConnected) {
+                Write-Verbose "Collecting Entra ID data..."
+                $adData['EntraUsers'] = Get-ADScoutEntraUserData -IncludeMFAStatus -IncludeGuests
+                $adData['EntraGroups'] = Get-ADScoutEntraGroupData
+                $adData['EntraApps'] = Get-ADScoutEntraAppData
+                $adData['EntraRoles'] = Get-ADScoutEntraRoleData
+                $adData['EntraPolicies'] = Get-ADScoutEntraPolicyData
+                $adData['EntraConnected'] = $true
+                Write-Verbose "Entra ID data collection complete"
+            }
+            else {
+                Write-Verbose "Microsoft Graph not connected. Entra ID rules will use their own data collection."
+                $adData['EntraConnected'] = $false
+            }
+        }
+        else {
+            $adData['EntraConnected'] = $false
         }
 
         Write-Verbose "Data collection complete"

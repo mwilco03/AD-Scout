@@ -33,22 +33,43 @@ Describe 'ADScout Module' {
     Context 'Exported Functions' {
         BeforeAll {
             $expectedFunctions = @(
+                # Core scanning
                 'Invoke-ADScoutScan'
                 'Get-ADScoutRule'
                 'New-ADScoutRule'
                 'Register-ADScoutRule'
+
+                # Reporting
                 'Export-ADScoutReport'
+                'Export-ADScoutNISTReport'
                 'Get-ADScoutRemediation'
+                'Show-ADScoutDashboard'
+
+                # Configuration
                 'Set-ADScoutConfig'
                 'Get-ADScoutConfig'
-                'Show-ADScoutDashboard'
+
+                # Microsoft Graph / Entra ID
+                'Connect-ADScoutGraph'
+                'Disconnect-ADScoutGraph'
+                'Test-ADScoutGraphConnection'
+
+                # Baseline storage
+                'Export-ADScoutBaseline'
+                'Import-ADScoutBaseline'
+                'Compare-ADScoutBaseline'
+
+                # CSV helpers
+                'ConvertFrom-ADScoutCSV'
+                'ConvertTo-ADScoutCSV'
+                'Test-ADScoutCSVEncoding'
             )
         }
 
         It 'Should export all expected functions' {
             $commands = Get-Command -Module ADScout
             foreach ($funcName in $expectedFunctions) {
-                $commands.Name | Should -Contain $funcName
+                $commands.Name | Should -Contain $funcName -Because "Function $funcName should be exported"
             }
         }
 
@@ -56,6 +77,8 @@ Describe 'ADScout Module' {
             $commands = Get-Command -Module ADScout
             $commands.Name | Should -Not -Contain 'Get-ADScoutUserData'
             $commands.Name | Should -Not -Contain 'Write-ADScoutLog'
+            $commands.Name | Should -Not -Contain 'Get-ADScoutEntraUserData'
+            $commands.Name | Should -Not -Contain 'Get-ADScoutEntraAppData'
         }
 
         It 'Should export exactly the expected number of functions' {
