@@ -1,0 +1,309 @@
+name: AD-Scout Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      category:
+        description: 'Rule categories to run (comma-separated). Valid: Anomalies, StaleObjects, PrivilegedAccounts, Trusts, Kerberos, GPO, PKI, EntraID, All'
+        required: false
+        type: string
+        default: 'All'
+      exclude_rules:
+        description: 'Rule IDs to exclude (comma-separated)'
+        required: false
+        type: string
+        default: ''
+      output_format:
+        description: 'Output format: SARIF, JSON, Markdown, Console'
+        required: false
+        type: string
+        default: 'SARIF'
+      fail_on_critical:
+        description: 'Fail the workflow if critical findings are detected'
+        required: false
+        type: boolean
+        default: true
+      fail_threshold:
+        description: 'Score threshold to fail the workflow (0 = never fail on score)'
+        required: false
+        type: number
+        default: 100
+      include_entra_id:
+        description: 'Include Entra ID (Azure AD) scanning'
+        required: false
+        type: boolean
+        default: false
+      upload_sarif:
+        description: 'Upload SARIF results to GitHub Security tab'
+        required: false
+        type: boolean
+        default: true
+      artifact_name:
+        description: 'Name for the uploaded artifact'
+        required: false
+        type: string
+        default: 'ad-scout-results'
+    secrets:
+      AZURE_TENANT_ID:
+        description: 'Azure Tenant ID for Entra ID scanning'
+        required: false
+      AZURE_CLIENT_ID:
+        description: 'Azure Client ID (Service Principal) for Entra ID scanning'
+        required: false
+      AZURE_CLIENT_SECRET:
+        description: 'Azure Client Secret for Entra ID scanning'
+        required: false
+    outputs:
+      total_score:
+        description: 'Total risk score from the scan'
+        value: ${{ jobs.scan.outputs.total_score }}
+      finding_count:
+        description: 'Total number of findings'
+        value: ${{ jobs.scan.outputs.finding_count }}
+      critical_count:
+        description: 'Number of critical findings'
+        value: ${{ jobs.scan.outputs.critical_count }}
+      scan_status:
+        description: 'Scan status: passed, failed, or error'
+        value: ${{ jobs.scan.outputs.scan_status }}
+
+jobs:
+  scan:
+    name: AD-Scout Security Scan
+    runs-on: windows-latest
+    outputs:
+      total_score: ${{ steps.run-scan.outputs.total_score }}
+      finding_count: ${{ steps.run-scan.outputs.finding_count }}
+      critical_count: ${{ steps.run-scan.outputs.critical_count }}
+      scan_status: ${{ steps.evaluate.outputs.status }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install AD-Scout module
+        shell: pwsh
+        run: |
+          # Check if AD-Scout is available locally (for self-hosted scenarios)
+          $localModule = Get-ChildItem -Path . -Filter 'ADScout.psd1' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if ($localModule) {
+              Write-Host "Found local AD-Scout module at: $($localModule.DirectoryName)"
+              Import-Module $localModule.FullName -Force
+          } else {
+              Write-Host "Installing AD-Scout from PowerShell Gallery..."
+              Set-PSRepository PSGallery -InstallationPolicy Trusted
+              Install-Module ADScout -Force -Scope CurrentUser -AllowPrerelease -ErrorAction SilentlyContinue
+
+              if (-not (Get-Module -ListAvailable ADScout)) {
+                  Write-Error "Failed to install AD-Scout module"
+                  exit 1
+              }
+              Import-Module ADScout -Force
+          }
+
+          $module = Get-Module ADScout
+          Write-Host "AD-Scout version: $($module.Version)"
+
+      - name: Connect to Entra ID
+        if: ${{ inputs.include_entra_id && secrets.AZURE_CLIENT_ID != '' }}
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          Write-Host "Connecting to Microsoft Graph for Entra ID scanning..."
+
+          # Install Microsoft Graph module if needed
+          if (-not (Get-Module -ListAvailable Microsoft.Graph.Authentication)) {
+              Install-Module Microsoft.Graph -Force -Scope CurrentUser
+          }
+
+          # Connect using service principal
+          $secureSecret = ConvertTo-SecureString $env:AZURE_CLIENT_SECRET -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential($env:AZURE_CLIENT_ID, $secureSecret)
+
+          Connect-ADScoutGraph -TenantId $env:AZURE_TENANT_ID `
+                               -ClientId $env:AZURE_CLIENT_ID `
+                               -ClientSecret $secureSecret
+
+          if (Test-ADScoutGraphConnection) {
+              Write-Host "Successfully connected to Microsoft Graph"
+          } else {
+              Write-Warning "Failed to connect to Microsoft Graph - Entra ID rules will be skipped"
+          }
+
+      - name: Run AD-Scout Scan
+        id: run-scan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Parse input parameters
+          $categories = '${{ inputs.category }}' -split ',' | ForEach-Object { $_.Trim() }
+          $excludeRules = '${{ inputs.exclude_rules }}' -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          $outputFormat = '${{ inputs.output_format }}'
+          $includeEntraID = [System.Boolean]::Parse('${{ inputs.include_entra_id }}')
+
+          Write-Host "=== AD-Scout Security Scan ===" -ForegroundColor Cyan
+          Write-Host "Categories: $($categories -join ', ')"
+          Write-Host "Output Format: $outputFormat"
+          Write-Host "Include Entra ID: $includeEntraID"
+          if ($excludeRules) {
+              Write-Host "Excluded Rules: $($excludeRules -join ', ')"
+          }
+          Write-Host ""
+
+          # Build scan parameters
+          $scanParams = @{}
+
+          if ($categories -and $categories[0] -ne 'All') {
+              $scanParams.Category = $categories
+          }
+
+          if ($excludeRules) {
+              $scanParams.ExcludeRuleId = $excludeRules
+          }
+
+          if ($includeEntraID) {
+              $scanParams.IncludeEntraID = $true
+          }
+
+          # Run the scan
+          Write-Host "Starting security scan..." -ForegroundColor Yellow
+          $results = Invoke-ADScoutScan @scanParams
+
+          if (-not $results) {
+              Write-Host "No findings detected" -ForegroundColor Green
+              "total_score=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              "finding_count=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              "critical_count=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              exit 0
+          }
+
+          # Calculate summary metrics
+          $totalScore = ($results | Measure-Object -Property Score -Sum).Sum
+          $findingCount = ($results | Measure-Object -Property FindingCount -Sum).Sum
+          $criticalCount = @($results | Where-Object { $_.Score -ge 50 }).Count
+          $highCount = @($results | Where-Object { $_.Score -ge 30 -and $_.Score -lt 50 }).Count
+
+          # Output metrics for subsequent steps
+          "total_score=$totalScore" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "finding_count=$findingCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "critical_count=$criticalCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          # Display summary
+          Write-Host ""
+          Write-Host "=== Scan Summary ===" -ForegroundColor Cyan
+          Write-Host "Total Score: $totalScore" -ForegroundColor $(if ($totalScore -ge 100) { 'Red' } elseif ($totalScore -ge 50) { 'Yellow' } else { 'Green' })
+          Write-Host "Total Findings: $findingCount"
+          Write-Host "Critical: $criticalCount | High: $highCount"
+          Write-Host ""
+
+          # Export results based on format
+          $outputPath = switch ($outputFormat) {
+              'SARIF' { './ad-scout-results.sarif' }
+              'JSON' { './ad-scout-results.json' }
+              'Markdown' { './ad-scout-results.md' }
+              default { $null }
+          }
+
+          if ($outputPath) {
+              Export-ADScoutReport -Results $results -Format $outputFormat -Path $outputPath
+              Write-Host "Results exported to: $outputPath"
+          } else {
+              # Console output
+              Export-ADScoutReport -Results $results -Format Console
+          }
+
+          # Also generate SARIF for GitHub Security tab if requested
+          if ('${{ inputs.upload_sarif }}' -eq 'true' -and $outputFormat -ne 'SARIF') {
+              Export-ADScoutReport -Results $results -Format SARIF -Path './ad-scout-results.sarif'
+              Write-Host "SARIF results exported for GitHub Security integration"
+          }
+
+          # Store results as JSON for artifact
+          $results | ConvertTo-Json -Depth 10 | Out-File -FilePath './ad-scout-full-results.json' -Encoding UTF8
+
+      - name: Upload SARIF to GitHub Security
+        if: ${{ inputs.upload_sarif && always() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./ad-scout-results.sarif
+          category: ad-scout
+        continue-on-error: true
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            ./ad-scout-results.*
+            ./ad-scout-full-results.json
+          retention-days: 30
+
+      - name: Evaluate scan results
+        id: evaluate
+        shell: pwsh
+        run: |
+          $totalScore = [int]'${{ steps.run-scan.outputs.total_score }}'
+          $criticalCount = [int]'${{ steps.run-scan.outputs.critical_count }}'
+          $failOnCritical = [System.Boolean]::Parse('${{ inputs.fail_on_critical }}')
+          $failThreshold = [int]'${{ inputs.fail_threshold }}'
+
+          $status = 'passed'
+          $failReason = $null
+
+          # Check for critical findings
+          if ($failOnCritical -and $criticalCount -gt 0) {
+              $status = 'failed'
+              $failReason = "Found $criticalCount critical findings"
+          }
+
+          # Check score threshold
+          if ($failThreshold -gt 0 -and $totalScore -ge $failThreshold) {
+              $status = 'failed'
+              $failReason = "Score $totalScore exceeds threshold $failThreshold"
+          }
+
+          "status=$status" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          if ($status -eq 'failed') {
+              Write-Host "::error::AD-Scout scan failed: $failReason"
+              exit 1
+          } else {
+              Write-Host "AD-Scout scan passed" -ForegroundColor Green
+          }
+
+      - name: Create summary
+        if: always()
+        shell: pwsh
+        run: |
+          $totalScore = '${{ steps.run-scan.outputs.total_score }}'
+          $findingCount = '${{ steps.run-scan.outputs.finding_count }}'
+          $criticalCount = '${{ steps.run-scan.outputs.critical_count }}'
+          $status = '${{ steps.evaluate.outputs.status }}'
+
+          $statusEmoji = if ($status -eq 'passed') { ':white_check_mark:' } else { ':x:' }
+          $scoreColor = if ([int]$totalScore -ge 100) { 'red' } elseif ([int]$totalScore -ge 50) { 'yellow' } else { 'green' }
+
+          $summary = @"
+          ## AD-Scout Security Scan Results $statusEmoji
+
+          | Metric | Value |
+          |--------|-------|
+          | **Status** | $status |
+          | **Total Score** | $totalScore |
+          | **Total Findings** | $findingCount |
+          | **Critical Findings** | $criticalCount |
+
+          ### Categories Scanned
+          ${{ inputs.category }}
+
+          ---
+          *Scan completed at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')*
+          "@
+
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append

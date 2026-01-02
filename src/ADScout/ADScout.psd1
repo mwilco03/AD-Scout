@@ -11,20 +11,42 @@
     CompatiblePSEditions = @('Desktop', 'Core')
 
     FunctionsToExport = @(
+        # Core scanning
         'Invoke-ADScoutScan'
         'Get-ADScoutRule'
         'New-ADScoutRule'
         'Register-ADScoutRule'
+
+        # Reporting
         'Export-ADScoutReport'
         'Export-ADScoutNISTReport'
         'Get-ADScoutRemediation'
-        'Set-ADScoutConfig'
-        'Get-ADScoutConfig'
+
+        # Dashboard (web UI)
         'Show-ADScoutDashboard'
         'Stop-ADScoutDashboard'
         'Get-ADScoutDashboard'
+
+        # Configuration
+        'Set-ADScoutConfig'
+        'Get-ADScoutConfig'
+
+        # Microsoft Graph / Entra ID
+        'Connect-ADScoutGraph'
+        'Disconnect-ADScoutGraph'
+        'Test-ADScoutGraphConnection'
+
+        # Baseline and history
         'Save-ADScoutBaseline'
         'Update-ADScoutHistory'
+        'Export-ADScoutBaseline'
+        'Import-ADScoutBaseline'
+        'Compare-ADScoutBaseline'
+
+        # CSV helpers
+        'ConvertFrom-ADScoutCSV'
+        'ConvertTo-ADScoutCSV'
+        'Test-ADScoutCSVEncoding'
     )
 
     CmdletsToExport   = @()
@@ -33,12 +55,12 @@
 
     PrivateData       = @{
         PSData = @{
-            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53')
+            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53', 'EntraID', 'AzureAD', 'MicrosoftGraph')
             LicenseUri   = 'https://github.com/mwilco03/AD-Scout/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/mwilco03/AD-Scout'
             IconUri      = ''
             ReleaseNotes = @'
-## v0.2.0 - Live Dashboard Release
+## v0.2.0 - Live Dashboard & Entra ID Release
 - Added interactive web dashboard using PSP (PowerShell Server Pages)
 - Three persona-based views: Auditor, Manager, Technician
 - Baseline comparison with trend tracking
@@ -47,7 +69,11 @@
 - One-click export to HTML, JSON, CSV, SARIF
 - Auto-refresh capability
 - API endpoints for programmatic access
-- New commands: Stop-ADScoutDashboard, Get-ADScoutDashboard, Save-ADScoutBaseline, Update-ADScoutHistory
+- Microsoft Graph / Entra ID integration
+- Baseline storage and comparison
+- New dashboard commands: Show-ADScoutDashboard, Stop-ADScoutDashboard, Get-ADScoutDashboard
+- New baseline commands: Save-ADScoutBaseline, Update-ADScoutHistory, Export/Import/Compare-ADScoutBaseline
+- New Graph commands: Connect/Disconnect/Test-ADScoutGraph
 '@
             Prerelease   = 'beta'
         }
