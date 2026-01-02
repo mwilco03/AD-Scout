@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1110')  # Domain Accounts, Brute Force
     }
 
-    CIS   = @('5.4.1')
-    STIG  = @('V-63421')
-    ANSSI = @('R40')
-    NIST  = @('IA-2(1)', 'IA-2(2)')
+    CIS   = @()  # Smart card requirements vary by organization policy
+    STIG  = @()  # Smart card STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('IA-2(1)', 'IA-2(2)')  # Multi-Factor Authentication
 
     Scoring = @{
         Type      = 'PerDiscover'

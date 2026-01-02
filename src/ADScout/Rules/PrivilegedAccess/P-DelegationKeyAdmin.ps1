@@ -19,10 +19,10 @@
         Techniques = @('T1098', 'T1556')    # Account Manipulation, Modify Authentication Process
     }
 
-    CIS   = @('5.2.9')
-    STIG  = @('V-73057')
-    ANSSI = @('vuln2_key_admin')
-    NIST  = @('AC-2', 'AC-3', 'AC-6')
+    CIS   = @()  # Key Admins groups not covered in CIS benchmarks
+    STIG  = @()  # Key Admin STIGs are Windows Server version-specific
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-3', 'AC-6')  # Account Management, Access Enforcement, Least Privilege
 
     Scoring = @{
         Type      = 'PerDiscover'

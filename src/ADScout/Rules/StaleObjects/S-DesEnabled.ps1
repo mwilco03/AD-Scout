@@ -19,10 +19,10 @@
         Techniques = @('T1558', 'T1557')  # Steal or Forge Kerberos Tickets, MITM
     }
 
-    CIS   = @('18.3.4')
-    STIG  = @('V-63629')
-    ANSSI = @('R46')
-    NIST  = @('SC-13', 'IA-5')
+    CIS   = @()  # CIS covers Kerberos encryption types in different sections per OS
+    STIG  = @()  # DES encryption STIGs vary by Windows version
+    ANSSI = @()
+    NIST  = @('SC-13', 'IA-5')  # Cryptographic Protection, Authenticator Management
 
     Scoring = @{
         Type      = 'PerDiscover'

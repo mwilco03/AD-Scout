@@ -19,10 +19,10 @@
         Techniques = @('T1484.001', 'T1059.001')  # Domain Policy Modification, PowerShell
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63415')
-    ANSSI = @('vuln1_gpo_file_write')
-    NIST  = @('AC-3', 'CM-5', 'CM-6')
+    CIS   = @()  # GPO file permissions not directly covered in CIS benchmarks
+    STIG  = @()  # GPO security STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'CM-5', 'CM-6')  # Access Enforcement, Access Restrictions, Configuration Settings
 
     Scoring = @{
         Type      = 'PerDiscover'

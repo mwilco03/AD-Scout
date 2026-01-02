@@ -20,10 +20,10 @@
         Techniques = @('T1098', 'T1003.006')  # Account Manipulation, DCSync
     }
 
-    CIS   = @('5.18')
-    STIG  = @('V-63441')
-    ANSSI = @('vuln1_exchange_privesc')
-    NIST  = @('AC-3', 'AC-6')
+    CIS   = @()  # Exchange privilege escalation not covered in CIS benchmarks
+    STIG  = @()  # CVE-based vulnerabilities addressed via patching
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6')  # Access Enforcement, Least Privilege
 
     Scoring = @{
         Type = 'TriggerOnPresence'

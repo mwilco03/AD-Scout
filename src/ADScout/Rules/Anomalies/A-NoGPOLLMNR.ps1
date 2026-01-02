@@ -19,10 +19,10 @@
         Techniques = @('T1557.001', 'T1040')  # LLMNR/NBT-NS Poisoning, Network Sniffing
     }
 
-    CIS   = @('18.5.4.1', '18.5.4.2')
-    STIG  = @('V-63723')
-    ANSSI = @('vuln1_llmnr', 'vuln1_netbios')
-    NIST  = @('SC-7', 'SC-8')
+    CIS   = @()  # LLMNR/NetBIOS settings covered in OS-specific CIS benchmarks
+    STIG  = @()  # Name resolution STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('SC-7', 'SC-8')  # Boundary Protection, Transmission Confidentiality
 
     Scoring = @{
         Type = 'TriggerOnPresence'

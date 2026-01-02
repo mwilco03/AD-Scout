@@ -19,10 +19,10 @@
         Techniques = @('T1558.001', 'T1078.002')  # Golden Ticket, Valid Accounts
     }
 
-    CIS   = @('5.5')
-    STIG  = @('V-63363')
-    ANSSI = @('vuln1_rodc_krbtgt')
-    NIST  = @('AC-2', 'IA-4')
+    CIS   = @()  # RODC account cleanup not covered in CIS benchmarks
+    STIG  = @()  # RODC STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-2', 'IA-4')  # Account Management, Identifier Management
 
     Scoring = @{
         Type      = 'PerDiscover'

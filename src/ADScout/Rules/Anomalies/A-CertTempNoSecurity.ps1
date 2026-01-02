@@ -19,10 +19,10 @@
         Techniques = @('T1649', 'T1098.001')  # Steal or Forge Authentication Certificates, Additional Cloud Credentials
     }
 
-    CIS   = @('5.9')
-    STIG  = @('V-36441')
-    ANSSI = @('vuln1_adcs_template_security')
-    NIST  = @('SC-12', 'IA-5')
+    CIS   = @()  # AD CS security not covered in CIS Windows benchmarks
+    STIG  = @()  # AD CS STIGs are product-specific
+    ANSSI = @()
+    NIST  = @('SC-12', 'IA-5')  # Cryptographic Key Management, Authenticator Management
 
     Scoring = @{
         Type      = 'PerDiscover'

@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1003')  # Domain Accounts, OS Credential Dumping
     }
 
-    CIS   = @('5.2.1')
-    STIG  = @('V-63539')
-    ANSSI = @('R36')
-    NIST  = @('AC-2', 'AC-6')
+    CIS   = @()  # CIS recommends limiting admin accounts but no specific control number
+    STIG  = @()  # No specific STIG for admin count threshold
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-6')  # Account Management, Least Privilege
 
     Scoring = @{
         Type      = 'ThresholdBased'

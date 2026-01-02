@@ -19,10 +19,10 @@
         Techniques = @('T1490')   # Inhibit System Recovery
     }
 
-    CIS   = @('10.1')
-    STIG  = @('V-63599')
-    ANSSI = @('vuln2_backup')
-    NIST  = @('CP-9', 'CP-10')
+    CIS   = @()  # Backup requirements vary by organization policy
+    STIG  = @()  # Backup STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('CP-9', 'CP-10')  # Information System Backup, Recovery
 
     Scoring = @{
         Type = 'TriggerOnPresence'

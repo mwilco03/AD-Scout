@@ -19,10 +19,10 @@
         Techniques = @('T1555.004', 'T1003')  # Credentials from Password Stores, OS Credential Dumping
     }
 
-    CIS   = @('2.2.6')
-    STIG  = @('V-63843', 'V-73783')
-    ANSSI = @('vuln2_credman_privilege')
-    NIST  = @('AC-3', 'AC-6', 'IA-5')
+    CIS   = @()  # User rights covered in OS-specific CIS benchmarks
+    STIG  = @()  # Credential Manager STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6', 'IA-5')  # Access Enforcement, Least Privilege, Authenticator Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'

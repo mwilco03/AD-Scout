@@ -20,10 +20,10 @@
         Techniques = @('T1557.001', 'T1649')  # LLMNR/NBT-NS Poisoning, Steal or Forge Authentication Certificates
     }
 
-    CIS   = @('5.9', '9.2')
-    STIG  = @('V-36441')
-    ANSSI = @('vuln1_adcs_esc8', 'vuln1_cert_http')
-    NIST  = @('SC-8', 'SC-12', 'IA-5')
+    CIS   = @()  # AD CS security not covered in CIS Windows benchmarks
+    STIG  = @()  # AD CS STIGs are product-specific
+    ANSSI = @()
+    NIST  = @('SC-8', 'SC-12', 'IA-5')  # Transmission Confidentiality, Cryptographic Key Management, Authenticator Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'

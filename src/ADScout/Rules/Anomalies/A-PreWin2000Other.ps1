@@ -19,10 +19,10 @@
         Techniques = @('T1087.002', 'T1069.002')  # Account Discovery: Domain, Permission Groups Discovery
     }
 
-    CIS   = @('5.2.4')
-    STIG  = @('V-63677')
-    ANSSI = @('vuln3_prewin2000')
-    NIST  = @('AC-2', 'AC-3')
+    CIS   = @()  # No direct CIS mapping
+    STIG  = @()  # No direct STIG mapping for this specific check
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-3')  # Account Management, Access Enforcement
 
     Scoring = @{
         Type      = 'PerDiscover'

@@ -19,10 +19,10 @@
         Techniques = @('T1562.002')  # Impair Defenses: Disable Windows Event Logging
     }
 
-    CIS   = @('17.1', '17.2', '17.3', '17.4', '17.5', '17.6', '17.7', '17.8', '17.9')
-    STIG  = @('V-63425', 'V-63427', 'V-63429')
-    ANSSI = @('R63', 'R64')
-    NIST  = @('AU-2', 'AU-3', 'AU-6', 'AU-12')
+    CIS   = @()  # CIS Chapter 17 covers auditing - specific controls vary by OS
+    STIG  = @()  # Audit STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('AU-2', 'AU-3', 'AU-6', 'AU-12')  # Audit Events, Content, Review, Generation
 
     Scoring = @{
         Type = 'TriggerOnPresence'

@@ -19,10 +19,10 @@
         Techniques = @('T1558', 'T1550.003')  # Steal or Forge Kerberos Tickets, Pass the Ticket
     }
 
-    CIS   = @('5.1')
-    STIG  = @('V-63375')
-    ANSSI = @('vuln1_trust_tgt_delegation')
-    NIST  = @('AC-4', 'AC-17')
+    CIS   = @()  # Forest trust settings not covered in CIS benchmarks
+    STIG  = @()  # Trust delegation STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-4', 'AC-17')  # Information Flow Enforcement, Remote Access
 
     Scoring = @{
         Type = 'TriggerOnPresence'

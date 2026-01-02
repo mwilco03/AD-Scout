@@ -19,10 +19,10 @@
         Techniques = @('T1649', 'T1078.002')  # Steal or Forge Authentication Certificates, Domain Accounts
     }
 
-    CIS   = @('5.9')
-    STIG  = @('V-36441')
-    ANSSI = @('vuln1_adcs_enroll_anyone')
-    NIST  = @('AC-3', 'SC-12')
+    CIS   = @()  # AD CS security not covered in CIS Windows benchmarks
+    STIG  = @()  # AD CS STIGs are product-specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'SC-12')  # Access Enforcement, Cryptographic Key Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'

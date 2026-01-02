@@ -19,10 +19,10 @@
         Techniques = @('T1557', 'T1040')  # Adversary-in-the-Middle, Network Sniffing
     }
 
-    CIS   = @('18.4.3')
-    STIG  = @('V-63577', 'V-73805')
-    ANSSI = @('vuln1_weak_tls')
-    NIST  = @('SC-8', 'SC-13')
+    CIS   = @()  # TLS settings covered in OS-specific benchmarks
+    STIG  = @()  # TLS/SSL STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('SC-8', 'SC-13')  # Transmission Confidentiality, Cryptographic Protection
 
     Scoring = @{
         Type = 'TriggerOnPresence'

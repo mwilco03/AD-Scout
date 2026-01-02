@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1558.003')  # Domain Accounts, Kerberoasting
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63405')
-    ANSSI = @('vuln2_service_accounts')
-    NIST  = @('IA-5', 'AC-2')
+    CIS   = @()  # gMSA usage not directly covered in CIS benchmarks
+    STIG  = @()  # Service account STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('IA-5', 'AC-2')  # Authenticator Management, Account Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'

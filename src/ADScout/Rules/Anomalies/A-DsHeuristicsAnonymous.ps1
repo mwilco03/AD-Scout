@@ -19,10 +19,10 @@
         Techniques = @('T1087.002', 'T1590.001')  # Account Discovery: Domain, Gather Victim Network Info
     }
 
-    CIS   = @('5.3.2')
-    STIG  = @('V-63367')
-    ANSSI = @('vuln1_anonymous_ldap')
-    NIST  = @('AC-3', 'AC-14')
+    CIS   = @()  # Anonymous access controls vary by CIS benchmark version
+    STIG  = @()  # Anonymous LDAP STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-14')  # Access Enforcement, Permitted Actions Without Identification
 
     Scoring = @{
         Type = 'TriggerOnPresence'

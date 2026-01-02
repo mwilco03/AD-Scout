@@ -20,10 +20,10 @@
         Techniques = @('T1558.001', 'T1068')  # Golden Ticket, Exploitation for Privilege Escalation
     }
 
-    CIS   = @('5.1.1')
-    STIG  = @('V-63327')
-    ANSSI = @('vuln1_ms14_068')
-    NIST  = @('SI-2', 'RA-5')
+    CIS   = @()  # Patching addressed via OS-specific CIS benchmarks
+    STIG  = @()  # CVE-based vulnerabilities addressed via patching
+    ANSSI = @()
+    NIST  = @('SI-2', 'RA-5')  # Flaw Remediation, Vulnerability Scanning
 
     Scoring = @{
         Type = 'TriggerOnPresence'

@@ -19,10 +19,10 @@
         Techniques = @('T1531')    # Account Access Removal
     }
 
-    CIS   = @('5.1')
-    STIG  = @('V-63553')
-    ANSSI = @('R34')
-    NIST  = @('CP-9', 'CP-10')
+    CIS   = @()  # No direct CIS mapping for AD Recycle Bin
+    STIG  = @()  # No direct STIG for Recycle Bin enablement
+    ANSSI = @()
+    NIST  = @('CP-9', 'CP-10')  # Information System Backup, Recovery
 
     Scoring = @{
         Type = 'TriggerOnPresence'

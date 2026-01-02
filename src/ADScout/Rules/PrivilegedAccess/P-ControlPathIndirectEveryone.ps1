@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1222.001')  # Valid Accounts: Domain, File and Directory Permissions Modification
     }
 
-    CIS   = @('5.18')
-    STIG  = @('V-63441')
-    ANSSI = @('vuln1_control_path_everyone')
-    NIST  = @('AC-3', 'AC-6')
+    CIS   = @()  # Control path analysis not covered in CIS benchmarks
+    STIG  = @()  # AD delegation STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6')  # Access Enforcement, Least Privilege
 
     Scoring = @{
         Type = 'TriggerOnPresence'

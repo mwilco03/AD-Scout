@@ -19,10 +19,10 @@
         Techniques = @('T1016')   # System Network Configuration Discovery
     }
 
-    CIS   = @('5.1')
-    STIG  = @('V-63381')
-    ANSSI = @('vuln3_subnet_missing')
-    NIST  = @('CM-6', 'CM-7')
+    CIS   = @()  # Subnet configuration not covered in CIS benchmarks
+    STIG  = @()  # AD Sites and Services STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('CM-6', 'CM-7')  # Configuration Settings, Least Functionality
 
     Scoring = @{
         Type      = 'PerDiscover'

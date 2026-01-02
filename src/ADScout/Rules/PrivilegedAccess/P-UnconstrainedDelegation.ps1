@@ -9,21 +9,21 @@
     DataSource  = 'Computers'
 
     References  = @(
-        @{ Title = 'Kerberos Delegation'; Url = 'https://docs.microsoft.com/en-us/windows-server/security/kerberos/kerberos-constrained-delegation-overview' }
-        @{ Title = 'Unconstrained Delegation Attacks'; Url = 'https://attack.mitre.org/techniques/T1558/001/' }
-        @{ Title = 'Printer Bug + Unconstrained Delegation'; Url = 'https://www.harmj0y.net/blog/redteaming/not-a-security-boundary-breaking-forest-trusts/' }
-        @{ Title = 'PingCastle Rule P-UnconstrainedDelegation'; Url = 'https://www.pingcastle.com/documentation/' }
+        @{ Title = 'Kerberos Delegation Overview'; Url = 'https://docs.microsoft.com/en-us/windows-server/security/kerberos/kerberos-constrained-delegation-overview' }
+        @{ Title = 'MITRE ATT&CK - Steal or Forge Kerberos Tickets'; Url = 'https://attack.mitre.org/techniques/T1558/' }
+        @{ Title = 'Printer Bug + Unconstrained Delegation'; Url = 'https://adsecurity.org/?p=4056' }
+        @{ Title = 'Microsoft Defender - Unsecure Kerberos Delegation'; Url = 'https://learn.microsoft.com/en-us/defender-for-identity/security-assessment-unconstrained-kerberos' }
     )
 
     MITRE = @{
         Tactics    = @('TA0004', 'TA0006')  # Privilege Escalation, Credential Access
-        Techniques = @('T1558.001', 'T1550.003')  # Golden Ticket, Pass the Ticket
+        Techniques = @('T1558', 'T1550.003')  # Steal or Forge Kerberos Tickets, Pass the Ticket
     }
 
-    CIS   = @('5.3.2')
-    STIG  = @('V-63567')
-    ANSSI = @('R48', 'vuln1_delegation')
-    NIST  = @('AC-3', 'AC-6', 'IA-5')
+    CIS   = @()  # No direct CIS mapping for delegation
+    STIG  = @('V-92285')  # AD Domain STIG - Unconstrained delegation
+    ANSSI = @()  # No direct ANSSI mapping
+    NIST  = @('AC-6', 'CM-7')  # Least Privilege, Least Functionality
 
     Scoring = @{
         Type      = 'PerDiscover'

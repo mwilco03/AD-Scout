@@ -20,10 +20,10 @@
         Techniques = @('T1134.005', 'T1199')  # SID-History Injection, Trusted Relationship
     }
 
-    CIS   = @('5.6')
-    STIG  = @('V-63631')
-    ANSSI = @('R41', 'vuln1_sid_filtering')
-    NIST  = @('AC-3', 'AC-17')
+    CIS   = @()  # No direct CIS mapping for trust SID filtering
+    STIG  = @()  # Trust-specific STIG - verify in AD Domain STIG
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-17')  # Access Enforcement, Remote Access
 
     Scoring = @{
         Type      = 'PerDiscover'

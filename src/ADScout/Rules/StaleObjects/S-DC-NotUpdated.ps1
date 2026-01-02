@@ -19,10 +19,10 @@
         Techniques = @('T1190', 'T1068')    # Exploit Public-Facing Application, Exploitation for Privilege Escalation
     }
 
-    CIS   = @('3.5')
-    STIG  = @('V-63361', 'V-63363')
-    ANSSI = @('R18')
-    NIST  = @('SI-2', 'RA-5')
+    CIS   = @()  # Patching requirements vary by OS version
+    STIG  = @()  # Patching STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('SI-2', 'RA-5')  # Flaw Remediation, Vulnerability Scanning
 
     Scoring = @{
         Type      = 'PerDiscover'

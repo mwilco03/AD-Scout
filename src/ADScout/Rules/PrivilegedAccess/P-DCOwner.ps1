@@ -19,10 +19,10 @@
         Techniques = @('T1222.001', 'T1078.002')  # File and Directory Permissions Modification, Domain Accounts
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63391')
-    ANSSI = @('vuln1_dc_owner')
-    NIST  = @('AC-3', 'AC-6')
+    CIS   = @()  # DC ownership not directly covered in CIS benchmarks
+    STIG  = @()  # Object ownership STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6')  # Access Enforcement, Least Privilege
 
     Scoring = @{
         Type      = 'PerDiscover'

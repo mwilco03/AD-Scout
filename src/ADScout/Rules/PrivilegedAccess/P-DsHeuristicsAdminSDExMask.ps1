@@ -19,10 +19,10 @@
         Techniques = @('T1222.001', 'T1562.001')  # File and Directory Permissions Modification, Disable or Modify Tools
     }
 
-    CIS   = @('5.6')
-    STIG  = @('V-63337')
-    ANSSI = @('vuln1_dsheuristics_adminsd')
-    NIST  = @('AC-3', 'AC-6')
+    CIS   = @()  # dsHeuristics not directly covered in CIS benchmarks
+    STIG  = @()  # AdminSDHolder STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6')  # Access Enforcement, Least Privilege
 
     Scoring = @{
         Type = 'TriggerOnPresence'

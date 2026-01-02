@@ -19,10 +19,10 @@
         Techniques = @('T1557.001', 'T1187')  # LLMNR/NBT-NS Poisoning, Forced Authentication
     }
 
-    CIS   = @('18.6.14.1')
-    STIG  = @('V-63577')
-    ANSSI = @('vuln2_hardened_unc')
-    NIST  = @('SC-8', 'SC-23')
+    CIS   = @()  # Hardened UNC Paths covered in OS-specific CIS benchmarks
+    STIG  = @()  # UNC path hardening STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('SC-8', 'SC-23')  # Transmission Confidentiality, Session Authenticity
 
     Scoring = @{
         Type = 'TriggerOnPresence'

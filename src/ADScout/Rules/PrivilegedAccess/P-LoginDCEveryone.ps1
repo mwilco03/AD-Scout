@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1021.001')  # Valid Accounts: Domain, Remote Desktop Protocol
     }
 
-    CIS   = @('2.2.21', '2.2.26')
-    STIG  = @('V-63869', 'V-63873')
-    ANSSI = @('vuln1_dc_logon_everyone')
-    NIST  = @('AC-3', 'AC-6(1)')
+    CIS   = @()  # DC logon rights covered in OS-specific CIS benchmarks
+    STIG  = @()  # User rights STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'AC-6(1)')  # Access Enforcement, Least Privilege
 
     Scoring = @{
         Type = 'TriggerOnPresence'

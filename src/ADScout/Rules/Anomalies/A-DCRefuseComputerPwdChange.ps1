@@ -18,10 +18,10 @@
         Techniques = @('T1003.001', 'T1078.002')  # LSASS Memory, Domain Accounts
     }
 
-    CIS   = @('2.3.6.1')
-    STIG  = @('V-63597')
-    ANSSI = @('vuln2_refuse_computer_pwd')
-    NIST  = @('IA-5', 'SC-28')
+    CIS   = @()  # This specific setting varies by benchmark version
+    STIG  = @()  # Machine password STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('IA-5', 'SC-28')  # Authenticator Management, Protection of Information at Rest
 
     Scoring = @{
         Type = 'TriggerOnPresence'

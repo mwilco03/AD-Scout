@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1098')  # Valid Accounts: Domain, Account Manipulation
     }
 
-    CIS   = @('5.1.3')
-    STIG  = @('V-63351')
-    ANSSI = @('vuln2_operators_groups')
-    NIST  = @('AC-2', 'AC-6')
+    CIS   = @()  # Operator group guidance varies by CIS benchmark version
+    STIG  = @()  # Privileged group STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-6')  # Account Management, Least Privilege
 
     Scoring = @{
         Type      = 'TriggerOnPresence'

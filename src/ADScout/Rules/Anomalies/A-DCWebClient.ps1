@@ -20,10 +20,10 @@
         Techniques = @('T1557.001', 'T1187')  # LLMNR/NBT-NS Poisoning, Forced Authentication
     }
 
-    CIS   = @('5.1')
-    STIG  = @('V-63651')
-    ANSSI = @('vuln1_dc_webclient')
-    NIST  = @('CM-7', 'SC-7')
+    CIS   = @()  # Service-specific settings vary by CIS benchmark version
+    STIG  = @()  # WebClient service STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('CM-7', 'SC-7')  # Least Functionality, Boundary Protection
 
     Scoring = @{
         Type = 'TriggerOnPresence'

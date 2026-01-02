@@ -19,10 +19,10 @@
         Techniques = @('T1110.001', 'T1110.003')  # Password Guessing, Password Spraying
     }
 
-    CIS   = @('1.1.4')
-    STIG  = @('V-63405')
-    ANSSI = @('R68')
-    NIST  = @('IA-5')
+    CIS   = @('1.1.4')  # Password Policy - Minimum password length
+    STIG  = @()  # Password length STIGs are OS-version specific
+    ANSSI = @()
+    NIST  = @('IA-5')  # Authenticator Management
 
     Scoring = @{
         Type      = 'ThresholdBased'

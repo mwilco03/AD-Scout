@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1069.002')  # Domain Accounts, Domain Groups
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63443')
-    ANSSI = @('vuln2_indirect_control')
-    NIST  = @('AC-2', 'AC-3', 'AC-6')
+    CIS   = @()  # Control path analysis not covered in CIS benchmarks
+    STIG  = @()  # AD delegation STIGs are environment-specific
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-3', 'AC-6')  # Account Management, Access Enforcement, Least Privilege
 
     Scoring = @{
         Type      = 'ThresholdBased'

@@ -19,10 +19,10 @@
         Techniques = @('T1134.005', 'T1078.002')  # SID-History Injection, Domain Accounts
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63387')
-    ANSSI = @('vuln3_primary_group')
-    NIST  = @('AC-2', 'CM-6')
+    CIS   = @()  # Primary group ID not covered in CIS benchmarks
+    STIG  = @()  # Account attribute STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-2', 'CM-6')  # Account Management, Configuration Settings
 
     Scoring = @{
         Type      = 'PerDiscover'

@@ -19,10 +19,10 @@
         Techniques = @('T1078.002', 'T1098')  # Valid Accounts: Domain Accounts, Account Manipulation
     }
 
-    CIS   = @('5.6')
-    STIG  = @('V-63337')
-    ANSSI = @('vuln1_adminsd_holder', 'vuln1_exchange_adminsd')
-    NIST  = @('AC-2', 'AC-6')
+    CIS   = @()  # Exchange AdminSDHolder not covered in CIS benchmarks
+    STIG  = @()  # Exchange-specific security STIGs vary by version
+    ANSSI = @()
+    NIST  = @('AC-2', 'AC-6')  # Account Management, Least Privilege
 
     Scoring = @{
         Type = 'TriggerOnPresence'

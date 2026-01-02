@@ -19,10 +19,10 @@
         Techniques = @('T1199', 'T1484.001')  # Trusted Relationship, Domain Policy Modification
     }
 
-    CIS   = @('5.2')
-    STIG  = @('V-63449')
-    ANSSI = @('vuln2_gpo_external_file')
-    NIST  = @('AC-3', 'CM-5', 'SC-7')
+    CIS   = @()  # GPO file location not covered in CIS benchmarks
+    STIG  = @()  # Cross-domain file references vary by environment
+    ANSSI = @()
+    NIST  = @('AC-3', 'CM-5', 'SC-7')  # Access Enforcement, Access Restrictions, Boundary Protection
 
     Scoring = @{
         Type      = 'PerDiscover'

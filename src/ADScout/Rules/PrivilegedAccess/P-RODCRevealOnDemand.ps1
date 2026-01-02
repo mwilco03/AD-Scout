@@ -19,10 +19,10 @@
         Techniques = @('T1003.003', 'T1078.002')  # OS Credential Dumping: NTDS, Valid Accounts
     }
 
-    CIS   = @('5.5')
-    STIG  = @('V-63363')
-    ANSSI = @('vuln1_rodc_prp')
-    NIST  = @('AC-3', 'IA-5')
+    CIS   = @()  # RODC password policy not covered in CIS benchmarks
+    STIG  = @()  # RODC STIGs are AD-version specific
+    ANSSI = @()
+    NIST  = @('AC-3', 'IA-5')  # Access Enforcement, Authenticator Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'

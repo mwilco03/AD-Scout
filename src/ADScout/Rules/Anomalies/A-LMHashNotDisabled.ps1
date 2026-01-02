@@ -9,20 +9,20 @@
     DataSource  = 'GPOs'
 
     References  = @(
-        @{ Title = 'LM Hash Security'; Url = 'https://docs.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/network-security-do-not-store-lan-manager-hash-value-on-next-password-change' }
-        @{ Title = 'Password Hash Cracking'; Url = 'https://attack.mitre.org/techniques/T1110/002/' }
-        @{ Title = 'PingCastle Rule A-LMHashNotDisabled'; Url = 'https://www.pingcastle.com/documentation/' }
+        @{ Title = 'Microsoft - Do not store LAN Manager hash'; Url = 'https://docs.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/network-security-do-not-store-lan-manager-hash-value-on-next-password-change' }
+        @{ Title = 'MITRE ATT&CK - Password Cracking'; Url = 'https://attack.mitre.org/techniques/T1110/002/' }
+        @{ Title = 'STIG Viewer - NoLMHash'; Url = 'https://stigviewer.com/stigs/microsoft_windows_server_2022' }
     )
 
     MITRE = @{
         Tactics    = @('TA0006')  # Credential Access
-        Techniques = @('T1003.002', 'T1110.002')  # LSASS, Password Cracking
+        Techniques = @('T1110.002')  # Brute Force: Password Cracking
     }
 
-    CIS   = @('2.3.11.5')
-    STIG  = @('V-63581', 'V-73685')
-    ANSSI = @('R37')
-    NIST  = @('IA-5', 'SC-13')
+    CIS   = @('2.3.11.5')  # Verified - Network security: Do not store LAN Manager hash
+    STIG  = @('V-205655')  # Windows Server 2019/2022 - NoLMHash
+    ANSSI = @()  # No direct ANSSI mapping verified
+    NIST  = @('IA-5')  # Authenticator Management
 
     Scoring = @{
         Type = 'TriggerOnPresence'
