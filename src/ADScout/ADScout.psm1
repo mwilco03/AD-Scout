@@ -31,6 +31,9 @@ foreach ($file in @($Private + $Public)) {
 # Export public functions
 Export-ModuleMember -Function $Public.BaseName
 
+# Module version
+$script:ADScoutVersion = '0.2.0'
+
 # Module-level configuration
 $script:ADScoutConfig = @{
     ParallelThrottleLimit = [Environment]::ProcessorCount
@@ -39,6 +42,9 @@ $script:ADScoutConfig = @{
     CacheTTL             = 300  # seconds
     LogLevel             = 'Warning'
 }
+
+# Dashboard state (used by web server)
+$script:ADScoutDashboard = $null
 
 # Module-level cache
 $script:ADScoutCache = @{

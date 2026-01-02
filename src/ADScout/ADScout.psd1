@@ -1,6 +1,6 @@
 @{
     RootModule        = 'ADScout.psm1'
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '0.2.0'
     GUID              = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
     Author            = 'AD-Scout Contributors'
     CompanyName       = 'Community'
@@ -21,6 +21,10 @@
         'Set-ADScoutConfig'
         'Get-ADScoutConfig'
         'Show-ADScoutDashboard'
+        'Stop-ADScoutDashboard'
+        'Get-ADScoutDashboard'
+        'Save-ADScoutBaseline'
+        'Update-ADScoutHistory'
     )
 
     CmdletsToExport   = @()
@@ -33,8 +37,19 @@
             LicenseUri   = 'https://github.com/mwilco03/AD-Scout/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/mwilco03/AD-Scout'
             IconUri      = ''
-            ReleaseNotes = 'Initial release'
-            Prerelease   = 'alpha'
+            ReleaseNotes = @'
+## v0.2.0 - Live Dashboard Release
+- Added interactive web dashboard using PSP (PowerShell Server Pages)
+- Three persona-based views: Auditor, Manager, Technician
+- Baseline comparison with trend tracking
+- Category breakdown with drill-down
+- Framework mapping display (MITRE, CIS, NIST, STIG)
+- One-click export to HTML, JSON, CSV, SARIF
+- Auto-refresh capability
+- API endpoints for programmatic access
+- New commands: Stop-ADScoutDashboard, Get-ADScoutDashboard, Save-ADScoutBaseline, Update-ADScoutHistory
+'@
+            Prerelease   = 'beta'
         }
     }
 }

@@ -1,0 +1,446 @@
+<%
+# Technician View - Detailed findings with drill-down and remediation
+$scoreClass = switch ($Summary.NormalizedScore) {
+    { $_ -ge 90 } { 'good'; break }
+    { $_ -ge 70 } { 'medium'; break }
+    { $_ -ge 50 } { 'high'; break }
+    default { 'critical' }
+}
+
+# Get unique categories for filter
+$categoryList = @($AllFindings | Select-Object -ExpandProperty Category -Unique | Sort-Object)
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AD-Scout Technician View - <%= $Meta.Domain %></title>
+    <link rel="stylesheet" href="/dashboard.css">
+    <% if ($EnableAutoRefresh) { %>
+    <meta http-equiv="refresh" content="<%= $RefreshSeconds %>">
+    <% } %>
+    <style>
+        .technician-header {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        .quick-stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .quick-stat {
+            padding: 12px 16px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            text-align: center;
+            min-width: 100px;
+        }
+        .quick-stat-value {
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .quick-stat-label {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+        }
+        .filters-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+        }
+        .filters-bar .search-input {
+            flex: 1;
+            min-width: 250px;
+        }
+        .table-container {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .table-scroll {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .findings-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .findings-table th {
+            position: sticky;
+            top: 0;
+            background: var(--color-surface-elevated);
+            z-index: 10;
+        }
+        .findings-table td {
+            vertical-align: top;
+        }
+        .expandable-row {
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+        .expandable-row:hover {
+            background-color: var(--color-surface-elevated);
+        }
+        .expandable-row.expanded {
+            background-color: var(--color-surface-elevated);
+        }
+        .row-details {
+            display: none;
+            background: var(--color-surface-elevated);
+        }
+        .row-details.expanded {
+            display: table-row;
+        }
+        .row-details td {
+            padding: 16px 24px;
+            border-left: 3px solid var(--color-accent);
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        .detail-section {
+            background: var(--color-surface);
+            padding: 12px;
+            border-radius: var(--radius-md);
+        }
+        .detail-section h4 {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--color-text-muted);
+            margin-bottom: 8px;
+        }
+        .affected-objects {
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+            font-family: var(--font-mono);
+        }
+        .affected-objects-item {
+            padding: 4px 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .remediation-container {
+            background: var(--color-bg);
+            padding: 12px;
+            border-radius: var(--radius-md);
+            margin-top: 12px;
+        }
+        .remediation-code {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+        .expand-icon {
+            display: inline-block;
+            width: 16px;
+            transition: transform 0.15s ease;
+        }
+        .expandable-row.expanded .expand-icon {
+            transform: rotate(90deg);
+        }
+        .bulk-actions {
+            display: flex;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="dashboard-title">
+                <h1>AD-Scout Technician View</h1>
+                <span class="domain-badge"><%= $Meta.Domain %></span>
+            </div>
+            <div class="dashboard-actions">
+                <button class="btn" id="run-scan">Refresh Scan</button>
+                <div class="dropdown">
+                    <button class="btn dropdown-toggle">Export</button>
+                    <div class="dropdown-menu">
+                        <a href="/api/export/html" class="dropdown-item">HTML Report</a>
+                        <a href="/api/export/json" class="dropdown-item">JSON</a>
+                        <a href="/api/export/csv" class="dropdown-item">CSV (Filtered)</a>
+                        <a href="/api/export/sarif" class="dropdown-item">SARIF</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- View Tabs -->
+        <nav class="view-tabs">
+            <a href="/auditor" class="view-tab">Auditor</a>
+            <a href="/manager" class="view-tab">Manager</a>
+            <a href="/technician" class="view-tab active">Technician</a>
+        </nav>
+
+        <!-- Quick Stats -->
+        <div class="technician-header">
+            <div class="quick-stats">
+                <div class="quick-stat">
+                    <div class="quick-stat-value <%= $scoreClass %>"><%= $Summary.NormalizedScore %></div>
+                    <div class="quick-stat-label">Score</div>
+                </div>
+                <div class="quick-stat">
+                    <div class="quick-stat-value"><%= $Summary.TotalFindings %></div>
+                    <div class="quick-stat-label">Findings</div>
+                </div>
+                <div class="quick-stat">
+                    <div class="quick-stat-value"><%= $Summary.RulesWithFindings %></div>
+                    <div class="quick-stat-label">Rules</div>
+                </div>
+                <div class="quick-stat">
+                    <div class="quick-stat-value"><%= ($AllFindings | Where-Object { $_.Severity -eq 'Critical' }).Count %></div>
+                    <div class="quick-stat-label">Critical</div>
+                </div>
+                <div class="quick-stat">
+                    <div class="quick-stat-value"><%= ($AllFindings | Where-Object { $_.Severity -eq 'High' }).Count %></div>
+                    <div class="quick-stat-label">High</div>
+                </div>
+            </div>
+
+            <% if ($State.IsFirstRun) { %>
+            <div style="margin-left: auto;">
+                <button class="btn btn-primary" id="save-baseline">Save as Baseline</button>
+            </div>
+            <% } %>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters-bar">
+            <input type="text" class="search-input" id="search-input" placeholder="Search by Rule ID, name, or description...">
+
+            <select class="filter-select" id="category-filter">
+                <option value="">All Categories</option>
+                <% foreach ($cat in $categoryList) { %>
+                <option value="<%= $cat %>"><%= $cat %></option>
+                <% } %>
+            </select>
+
+            <select class="filter-select" id="severity-filter">
+                <option value="">All Severities</option>
+                <option value="Critical">Critical</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+            </select>
+
+            <span id="filtered-count" style="align-self: center; color: var(--color-text-muted); font-size: 14px;">
+                <%= $AllFindings.Count %> findings
+            </span>
+        </div>
+
+        <!-- Findings Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <span class="card-title">All Findings</span>
+                <div class="bulk-actions">
+                    <button class="btn btn-icon" title="Expand All" onclick="document.querySelectorAll('.expandable-row').forEach(r => r.click())">
+                        &#x2195;
+                    </button>
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table class="findings-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 30px;"></th>
+                            <th style="width: 80px;">Severity</th>
+                            <th style="width: 150px;">Rule ID</th>
+                            <th>Rule Name</th>
+                            <th style="width: 120px;">Category</th>
+                            <th style="width: 80px;">Count</th>
+                            <th style="width: 80px;">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% foreach ($finding in $AllFindings) { %>
+                        <tr class="expandable-row finding-row"
+                            data-rule-id="<%= $finding.RuleId %>"
+                            data-rule-name="<%= $finding.RuleName %>"
+                            data-category="<%= $finding.Category %>"
+                            data-severity="<%= $finding.Severity %>"
+                            data-description="<%= $finding.Description %>">
+                            <td><span class="expand-icon">&#9656;</span></td>
+                            <td>
+                                <span class="severity <%= $finding.Severity.ToLower() %>"></span>
+                                <%= $finding.Severity %>
+                            </td>
+                            <td><span class="rule-id"><%= $finding.RuleId %></span></td>
+                            <td><%= $finding.RuleName %></td>
+                            <td><%= $finding.Category %></td>
+                            <td><%= $finding.FindingCount %></td>
+                            <td><%= $finding.Score %></td>
+                        </tr>
+                        <tr class="row-details" data-rule-id="<%= $finding.RuleId %>">
+                            <td colspan="7">
+                                <div class="detail-grid">
+                                    <div class="detail-section">
+                                        <h4>Description</h4>
+                                        <p><%= $finding.Description %></p>
+
+                                        <% if ($finding.TechnicalExplanation) { %>
+                                        <h4 style="margin-top: 12px;">Technical Details</h4>
+                                        <p style="font-size: 13px; color: var(--color-text-muted);"><%= $finding.TechnicalExplanation %></p>
+                                        <% } %>
+                                    </div>
+
+                                    <div class="detail-section">
+                                        <h4>Framework Mappings</h4>
+                                        <div class="framework-tags">
+                                            <% if ($finding.MITRE) { %><span class="framework-tag">MITRE: <%= $finding.MITRE %></span><% } %>
+                                            <% if ($finding.CIS) { %><span class="framework-tag">CIS: <%= $finding.CIS %></span><% } %>
+                                            <% if ($finding.NIST) { %><span class="framework-tag">NIST: <%= $finding.NIST %></span><% } %>
+                                            <% if ($finding.STIG) { %><span class="framework-tag">STIG: <%= $finding.STIG %></span><% } %>
+                                        </div>
+
+                                        <% if ($finding.References -and $finding.References.Count -gt 0) { %>
+                                        <h4 style="margin-top: 12px;">References</h4>
+                                        <ul style="font-size: 12px; margin: 0; padding-left: 16px;">
+                                            <% foreach ($ref in $finding.References | Select-Object -First 3) { %>
+                                            <li><a href="<%= $ref %>" target="_blank" style="color: var(--color-accent);"><%= $ref %></a></li>
+                                            <% } %>
+                                        </ul>
+                                        <% } %>
+                                    </div>
+
+                                    <% if ($finding.Findings -and $finding.Findings.Count -gt 0) { %>
+                                    <div class="detail-section" style="grid-column: span 2;">
+                                        <h4>Affected Objects (<%= $finding.FindingCount %> total, showing first 20)</h4>
+                                        <div class="affected-objects">
+                                            <% foreach ($obj in $finding.Findings | Select-Object -First 20) { %>
+                                            <div class="affected-objects-item">
+                                                <% if ($obj.SamAccountName) { %><%= $obj.SamAccountName %><% }
+                                                   elseif ($obj.Name) { %><%= $obj.Name %><% }
+                                                   elseif ($obj.DistinguishedName) { %><%= $obj.DistinguishedName %><% }
+                                                   else { %><%= $obj | ConvertTo-Json -Compress %><% } %>
+                                            </div>
+                                            <% } %>
+                                            <% if ($finding.Findings.Count -gt 20) { %>
+                                            <div class="affected-objects-item" style="color: var(--color-text-muted); font-style: italic;">
+                                                ... and <%= $finding.Findings.Count - 20 %> more
+                                            </div>
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                    <% } %>
+
+                                    <% if ($finding.HasRemediation) { %>
+                                    <div class="detail-section" style="grid-column: span 2;">
+                                        <h4>Remediation Script</h4>
+                                        <div class="remediation-container" data-loaded="false">
+                                            <button class="btn" onclick="Dashboard.loadRemediation('<%= $finding.RuleId %>', this.parentElement)">
+                                                Load Remediation Script
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <% } %>
+                                </div>
+                            </td>
+                        </tr>
+                        <% } %>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <% if (-not $State.HasEntraID) { %>
+        <!-- Entra ID Prompt -->
+        <div class="entra-prompt" style="margin-top: 24px;">
+            <span class="entra-prompt-icon">&#9729;</span>
+            <span class="entra-prompt-text">
+                <strong>Entra ID not connected.</strong>
+                Connect to Microsoft Graph to see cloud identity findings.
+            </span>
+        </div>
+        <% } %>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div>
+                <span>Scan: <%= $Meta.ScanTime.ToString('yyyy-MM-dd HH:mm:ss') %></span>
+                <span style="margin-left: 16px;">Version: <%= $Meta.Version %></span>
+            </div>
+            <div>
+                <% if ($EnableAutoRefresh) { %>
+                <span class="auto-refresh">
+                    <span class="auto-refresh-dot"></span>
+                    Auto-refresh: <%= $RefreshSeconds %>s
+                </span>
+                <% } %>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/dashboard.js"></script>
+    <script>
+        // Additional technician-specific functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Handle expandable rows
+            document.querySelectorAll('.expandable-row').forEach(function(row) {
+                row.addEventListener('click', function(e) {
+                    // Don't expand if clicking on a link or button
+                    if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+
+                    const ruleId = this.dataset.ruleId;
+                    const detailsRow = document.querySelector('.row-details[data-rule-id="' + ruleId + '"]');
+
+                    this.classList.toggle('expanded');
+                    if (detailsRow) {
+                        detailsRow.classList.toggle('expanded');
+                    }
+                });
+            });
+        });
+
+        // Load remediation script on demand
+        Dashboard.loadRemediation = function(ruleId, container) {
+            container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+
+            fetch('/api/remediation/' + encodeURIComponent(ruleId))
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    if (data.success && data.remediation) {
+                        container.innerHTML =
+                            '<pre class="remediation-code">' + data.remediation.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>' +
+                            '<button class="btn copy-btn" style="margin-top: 8px;">Copy to Clipboard</button>';
+
+                        container.querySelector('.copy-btn').addEventListener('click', function() {
+                            navigator.clipboard.writeText(data.remediation).then(function() {
+                                container.querySelector('.copy-btn').textContent = 'Copied!';
+                                setTimeout(function() {
+                                    container.querySelector('.copy-btn').textContent = 'Copy to Clipboard';
+                                }, 2000);
+                            });
+                        });
+                    } else {
+                        container.innerHTML = '<p style="color: var(--color-text-muted);">No remediation script available for this rule.</p>';
+                    }
+                })
+                .catch(function(error) {
+                    container.innerHTML = '<p style="color: var(--color-critical);">Error loading remediation: ' + error.message + '</p>';
+                });
+        };
+    </script>
+</body>
+</html>

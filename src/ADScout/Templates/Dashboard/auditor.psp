@@ -1,0 +1,361 @@
+<%
+# Auditor View - Compliance validation and audit documentation
+$scoreClass = switch ($Summary.NormalizedScore) {
+    { $_ -ge 90 } { 'good'; break }
+    { $_ -ge 70 } { 'medium'; break }
+    { $_ -ge 50 } { 'high'; break }
+    default { 'critical' }
+}
+
+# Get unique MITRE techniques
+$mitreList = @($AllFindings | Where-Object { $_.MITRE } | ForEach-Object { $_.MITRE } | ForEach-Object { $_ -split ', ' } | Select-Object -Unique)
+$cisList = @($AllFindings | Where-Object { $_.CIS } | ForEach-Object { $_.CIS } | ForEach-Object { $_ -split ', ' } | Select-Object -Unique)
+$nistList = @($AllFindings | Where-Object { $_.NIST } | ForEach-Object { $_.NIST } | ForEach-Object { $_ -split ', ' } | Select-Object -Unique)
+$stigList = @($AllFindings | Where-Object { $_.STIG } | ForEach-Object { $_.STIG } | ForEach-Object { $_ -split ', ' } | Select-Object -Unique)
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AD-Scout Auditor View - <%= $Meta.Domain %></title>
+    <link rel="stylesheet" href="/dashboard.css">
+    <% if ($EnableAutoRefresh) { %>
+    <meta http-equiv="refresh" content="<%= $RefreshSeconds %>">
+    <% } %>
+    <style>
+        .audit-header {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 32px;
+            margin-bottom: 32px;
+            padding: 24px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+        }
+        .large-score {
+            text-align: center;
+        }
+        .large-score-value {
+            font-size: 96px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .audit-meta {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        .audit-meta-item {
+            padding: 12px;
+            background: var(--color-surface-elevated);
+            border-radius: var(--radius-md);
+        }
+        .audit-meta-label {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .audit-meta-value {
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+        .critical-findings {
+            margin-top: 24px;
+        }
+        .finding-card {
+            padding: 16px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            margin-bottom: 12px;
+            background: var(--color-surface);
+        }
+        .finding-card.critical { border-left: 4px solid var(--color-critical); }
+        .finding-card.high { border-left: 4px solid var(--color-high); }
+        .finding-card.medium { border-left: 4px solid var(--color-medium); }
+        .finding-card.low { border-left: 4px solid var(--color-low); }
+        .finding-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .finding-title {
+            font-weight: 600;
+        }
+        .finding-meta {
+            font-size: 12px;
+            color: var(--color-text-muted);
+        }
+        .finding-description {
+            font-size: 14px;
+            color: var(--color-text-muted);
+            margin-bottom: 12px;
+        }
+        .finding-frameworks {
+            margin-top: 8px;
+        }
+        .print-section {
+            display: none;
+        }
+        @media print {
+            .print-section { display: block; }
+            .no-print { display: none; }
+            .audit-header { page-break-after: avoid; }
+            .finding-card { page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="dashboard-title">
+                <h1>AD-Scout Auditor View</h1>
+                <span class="domain-badge"><%= $Meta.Domain %></span>
+            </div>
+            <div class="dashboard-actions no-print">
+                <button class="btn" onclick="window.print()">Print Report</button>
+                <div class="dropdown">
+                    <button class="btn dropdown-toggle">Export</button>
+                    <div class="dropdown-menu">
+                        <a href="/api/export/html" class="dropdown-item">HTML Report</a>
+                        <a href="/api/export/json" class="dropdown-item">JSON</a>
+                        <a href="/api/export/csv" class="dropdown-item">CSV</a>
+                        <a href="/api/export/sarif" class="dropdown-item">SARIF</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- View Tabs -->
+        <nav class="view-tabs no-print">
+            <a href="/auditor" class="view-tab active">Auditor</a>
+            <a href="/manager" class="view-tab">Manager</a>
+            <a href="/technician" class="view-tab">Technician</a>
+        </nav>
+
+        <!-- Audit Header with Large Score -->
+        <div class="audit-header">
+            <div class="large-score">
+                <div class="large-score-value <%= $scoreClass %>"><%= $Summary.NormalizedScore %></div>
+                <div class="score-label">Security Score</div>
+                <div class="score-grade <%= $Summary.Grade %>" style="margin-top: 16px;"><%= $Summary.Grade %></div>
+
+                <% if ($State.IsFirstRun) { %>
+                <div style="margin-top: 12px;">
+                    <span class="badge badge-info">Initial Assessment</span>
+                </div>
+                <% } else { %>
+                <div class="trend <%= $Comparison.Trend.ToLower() %>" style="margin-top: 12px;">
+                    <span class="trend-arrow"><%= $Comparison.TrendArrow %></span>
+                    <span><%= $Comparison.Trend %></span>
+                </div>
+                <% } %>
+            </div>
+
+            <div class="audit-meta">
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Total Findings</div>
+                    <div class="audit-meta-value"><%= $Summary.TotalFindings %></div>
+                </div>
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Rules Triggered</div>
+                    <div class="audit-meta-value"><%= $Summary.RulesWithFindings %> / <%= $Summary.TotalRules %></div>
+                </div>
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Scan Date</div>
+                    <div class="audit-meta-value"><%= $Meta.ScanTime.ToString('yyyy-MM-dd HH:mm') %></div>
+                </div>
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Scanner Version</div>
+                    <div class="audit-meta-value"><%= $Meta.Version %></div>
+                </div>
+
+                <% if (-not $State.IsFirstRun) { %>
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Baseline Comparison</div>
+                    <div class="audit-meta-value">
+                        <% if ($Comparison.Trend -eq 'Improving') { %>
+                        <span style="color: var(--color-low);">+<%= $Comparison.ScoreDelta %> points improved</span>
+                        <% } elseif ($Comparison.Trend -eq 'Degrading') { %>
+                        <span style="color: var(--color-critical);">-<%= $Comparison.ScoreDelta %> points degraded</span>
+                        <% } else { %>
+                        <span>No change</span>
+                        <% } %>
+                    </div>
+                </div>
+                <div class="audit-meta-item">
+                    <div class="audit-meta-label">Changes Since Baseline</div>
+                    <div class="audit-meta-value">
+                        +<%= $Comparison.NewFindings %> new, -<%= $Comparison.ResolvedFindings %> resolved
+                    </div>
+                </div>
+                <% } else { %>
+                <div class="audit-meta-item no-print" style="grid-column: span 2;">
+                    <button class="btn btn-primary" id="save-baseline" style="width: 100%;">Save as Baseline</button>
+                </div>
+                <% } %>
+            </div>
+        </div>
+
+        <!-- Framework Mapping Summary -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">Framework Mapping Summary</span>
+            </div>
+            <div class="grid grid-4" style="gap: 16px;">
+                <div style="text-align: center; padding: 16px; background: var(--color-surface-elevated); border-radius: var(--radius-md);">
+                    <div style="font-size: 32px; font-weight: 700; color: var(--color-accent);"><%= $Frameworks.MITRE %></div>
+                    <div style="font-size: 12px; color: var(--color-text-muted);">MITRE ATT&CK Techniques</div>
+                    <div style="font-size: 11px; color: var(--color-text-subtle); margin-top: 4px;">
+                        <% if ($mitreList.Count -gt 0) { %><%= ($mitreList | Select-Object -First 5) -join ', ' %><% if ($mitreList.Count -gt 5) { %>...<% } %><% } else { %>None detected<% } %>
+                    </div>
+                </div>
+                <div style="text-align: center; padding: 16px; background: var(--color-surface-elevated); border-radius: var(--radius-md);">
+                    <div style="font-size: 32px; font-weight: 700; color: var(--color-accent);"><%= $Frameworks.CIS %></div>
+                    <div style="font-size: 12px; color: var(--color-text-muted);">CIS Controls</div>
+                    <div style="font-size: 11px; color: var(--color-text-subtle); margin-top: 4px;">
+                        <% if ($cisList.Count -gt 0) { %><%= ($cisList | Select-Object -First 5) -join ', ' %><% if ($cisList.Count -gt 5) { %>...<% } %><% } else { %>None mapped<% } %>
+                    </div>
+                </div>
+                <div style="text-align: center; padding: 16px; background: var(--color-surface-elevated); border-radius: var(--radius-md);">
+                    <div style="font-size: 32px; font-weight: 700; color: var(--color-accent);"><%= $Frameworks.NIST %></div>
+                    <div style="font-size: 12px; color: var(--color-text-muted);">NIST 800-53 Controls</div>
+                    <div style="font-size: 11px; color: var(--color-text-subtle); margin-top: 4px;">
+                        <% if ($nistList.Count -gt 0) { %><%= ($nistList | Select-Object -First 5) -join ', ' %><% if ($nistList.Count -gt 5) { %>...<% } %><% } else { %>None mapped<% } %>
+                    </div>
+                </div>
+                <div style="text-align: center; padding: 16px; background: var(--color-surface-elevated); border-radius: var(--radius-md);">
+                    <div style="font-size: 32px; font-weight: 700; color: var(--color-accent);"><%= $Frameworks.STIG %></div>
+                    <div style="font-size: 12px; color: var(--color-text-muted);">STIG References</div>
+                    <div style="font-size: 11px; color: var(--color-text-subtle); margin-top: 4px;">
+                        <% if ($stigList.Count -gt 0) { %><%= ($stigList | Select-Object -First 5) -join ', ' %><% if ($stigList.Count -gt 5) { %>...<% } %><% } else { %>None mapped<% } %>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span class="card-title">Category Breakdown</span>
+            </div>
+            <div class="grid grid-2" style="gap: 16px;">
+                <div>
+                    <ul class="category-list">
+                        <% $catIndex = 0; foreach ($cat in $Categories) { $catIndex++; if ($catIndex -le [math]::Ceiling($Categories.Count / 2)) { %>
+                        <li class="category-item">
+                            <span class="category-name">
+                                <%= $cat.Category %>
+                                <% if ($cat.IsNew) { %><span class="badge badge-new">NEW</span><% } %>
+                            </span>
+                            <div class="category-bar">
+                                <div class="category-bar-fill <%= $cat.Color %>" style="width: <%= [math]::Min(100, ($cat.Score * 2)) %>%;"></div>
+                            </div>
+                            <span class="category-count"><%= $cat.FindingCount %></span>
+                        </li>
+                        <% } } %>
+                    </ul>
+                </div>
+                <div>
+                    <ul class="category-list">
+                        <% $catIndex = 0; foreach ($cat in $Categories) { $catIndex++; if ($catIndex -gt [math]::Ceiling($Categories.Count / 2)) { %>
+                        <li class="category-item">
+                            <span class="category-name">
+                                <%= $cat.Category %>
+                                <% if ($cat.IsNew) { %><span class="badge badge-new">NEW</span><% } %>
+                            </span>
+                            <div class="category-bar">
+                                <div class="category-bar-fill <%= $cat.Color %>" style="width: <%= [math]::Min(100, ($cat.Score * 2)) %>%;"></div>
+                            </div>
+                            <span class="category-count"><%= $cat.FindingCount %></span>
+                        </li>
+                        <% } } %>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Critical Findings Table -->
+        <div class="card critical-findings">
+            <div class="card-header">
+                <span class="card-title">Critical Findings (Top 10)</span>
+                <a href="/technician" class="btn no-print">View All Findings</a>
+            </div>
+
+            <% $criticalFindings = $TopFindings | Select-Object -First 10 %>
+            <% if ($criticalFindings.Count -eq 0) { %>
+            <div class="empty-state">
+                <div class="empty-state-icon">&#10003;</div>
+                <p>No critical findings detected</p>
+            </div>
+            <% } else { %>
+            <% foreach ($finding in $criticalFindings) { %>
+            <div class="finding-card <%= $finding.Severity.ToLower() %>">
+                <div class="finding-header">
+                    <div>
+                        <div class="finding-title">
+                            <span class="severity <%= $finding.Severity.ToLower() %>"></span>
+                            <%= $finding.RuleName %>
+                        </div>
+                        <div class="finding-meta">
+                            <%= $finding.RuleId %> | Category: <%= $finding.Category %> | Count: <%= $finding.FindingCount %>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="badge badge-<%= switch($finding.Severity) { 'Critical' { 'critical' } 'High' { 'warning' } default { 'info' } } %>">
+                            <%= $finding.Severity %>
+                        </span>
+                    </div>
+                </div>
+                <div class="finding-description">
+                    <%= $finding.Description %>
+                </div>
+                <div class="finding-frameworks">
+                    <div class="framework-tags">
+                        <% if ($finding.MITRE) { %><span class="framework-tag">MITRE: <%= $finding.MITRE %></span><% } %>
+                        <% if ($finding.CIS) { %><span class="framework-tag">CIS: <%= $finding.CIS %></span><% } %>
+                        <% if ($finding.NIST) { %><span class="framework-tag">NIST: <%= $finding.NIST %></span><% } %>
+                        <% if ($finding.STIG) { %><span class="framework-tag">STIG: <%= $finding.STIG %></span><% } %>
+                    </div>
+                </div>
+            </div>
+            <% } %>
+            <% } %>
+        </div>
+
+        <% if (-not $State.HasEntraID) { %>
+        <!-- Entra ID Prompt -->
+        <div class="entra-prompt" style="margin-top: 24px;">
+            <span class="entra-prompt-icon">&#9729;</span>
+            <span class="entra-prompt-text">
+                <strong>Entra ID not connected.</strong>
+                Connect to Microsoft Graph to scan cloud identity configurations for additional compliance findings.
+            </span>
+        </div>
+        <% } %>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div>
+                <span>Generated: <%= (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') %></span>
+                <span style="margin-left: 16px;">AD-Scout v<%= $Meta.Version %></span>
+            </div>
+            <div class="no-print">
+                <% if ($EnableAutoRefresh) { %>
+                <span class="auto-refresh">
+                    <span class="auto-refresh-dot"></span>
+                    Auto-refresh: <%= $RefreshSeconds %>s
+                </span>
+                <% } %>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/dashboard.js"></script>
+</body>
+</html>

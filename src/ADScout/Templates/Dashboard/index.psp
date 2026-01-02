@@ -1,0 +1,225 @@
+<%
+# Main dashboard - redirects to auditor view by default
+$scoreClass = switch ($Summary.NormalizedScore) {
+    { $_ -ge 90 } { 'good'; break }
+    { $_ -ge 70 } { 'medium'; break }
+    { $_ -ge 50 } { 'high'; break }
+    default { 'critical' }
+}
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AD-Scout Dashboard - <%= $Meta.Domain %></title>
+    <link rel="stylesheet" href="/dashboard.css">
+    <% if ($EnableAutoRefresh) { %>
+    <meta http-equiv="refresh" content="<%= $RefreshSeconds %>">
+    <% } %>
+</head>
+<body>
+    <div class="dashboard" data-auto-refresh="<%= $EnableAutoRefresh %>" data-refresh-interval="<%= $RefreshSeconds %>">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="dashboard-title">
+                <h1>AD-Scout Dashboard</h1>
+                <span class="domain-badge"><%= $Meta.Domain %></span>
+            </div>
+            <div class="dashboard-actions">
+                <button class="btn" id="run-scan" title="Run New Scan">Refresh Scan</button>
+                <div class="dropdown">
+                    <button class="btn dropdown-toggle">Export</button>
+                    <div class="dropdown-menu">
+                        <a href="/api/export/html" class="dropdown-item" data-export="html">HTML Report</a>
+                        <a href="/api/export/json" class="dropdown-item" data-export="json">JSON</a>
+                        <a href="/api/export/csv" class="dropdown-item" data-export="csv">CSV</a>
+                        <a href="/api/export/sarif" class="dropdown-item" data-export="sarif">SARIF</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- View Tabs -->
+        <nav class="view-tabs">
+            <a href="/auditor" class="view-tab active">Auditor</a>
+            <a href="/manager" class="view-tab">Manager</a>
+            <a href="/technician" class="view-tab">Technician</a>
+        </nav>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-3">
+            <!-- Score Card -->
+            <div class="card score-card">
+                <div class="score-value <%= $scoreClass %>"><%= $Summary.NormalizedScore %></div>
+                <div class="score-label">Security Score</div>
+                <div class="score-grade <%= $Summary.Grade %>"><%= $Summary.Grade %></div>
+
+                <% if ($State.IsFirstRun) { %>
+                <div style="margin-top: 16px;">
+                    <span class="badge badge-info">Initial Assessment</span>
+                </div>
+                <% } else { %>
+                <div class="trend <%= $Comparison.Trend.ToLower() %>">
+                    <span class="trend-arrow"><%= $Comparison.TrendArrow %></span>
+                    <span><%= $Comparison.ScoreDelta %> points <%= if ($Comparison.Trend -eq 'Improving') { 'improved' } elseif ($Comparison.Trend -eq 'Degrading') { 'degraded' } else { 'unchanged' } %></span>
+                </div>
+                <% } %>
+            </div>
+
+            <!-- Stats Summary -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Summary</span>
+                </div>
+                <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="stat-item">
+                        <div class="stat-value" data-stat="findings"><%= $Summary.TotalFindings %></div>
+                        <div class="stat-label">Total Findings</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" data-stat="rules"><%= $Summary.RulesWithFindings %></div>
+                        <div class="stat-label">Rules Triggered</div>
+                    </div>
+                </div>
+
+                <% if (-not $State.IsFirstRun) { %>
+                <div class="comparison-summary">
+                    <div class="comparison-item">
+                        <div class="comparison-value <%= if ($Comparison.NewFindings -gt 0) { 'negative' } else { 'neutral' } %>">
+                            +<%= $Comparison.NewFindings %>
+                        </div>
+                        <div class="comparison-label">New Issues</div>
+                    </div>
+                    <div class="comparison-item">
+                        <div class="comparison-value <%= if ($Comparison.ResolvedFindings -gt 0) { 'positive' } else { 'neutral' } %>">
+                            -<%= $Comparison.ResolvedFindings %>
+                        </div>
+                        <div class="comparison-label">Resolved</div>
+                    </div>
+                    <div class="comparison-item">
+                        <div class="comparison-value neutral">
+                            <%= $Comparison.BaselineDate.Split('T')[0] %>
+                        </div>
+                        <div class="comparison-label">vs Baseline</div>
+                    </div>
+                </div>
+                <% } else { %>
+                <div style="margin-top: 16px; text-align: center;">
+                    <button class="btn btn-primary" id="save-baseline">Save as Baseline</button>
+                    <p style="margin-top: 8px; font-size: 12px; color: var(--color-text-muted);">
+                        Save current scan to track changes over time
+                    </p>
+                </div>
+                <% } %>
+            </div>
+
+            <!-- Framework Coverage -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Framework Coverage</span>
+                </div>
+                <div class="framework-summary">
+                    <div class="framework-item">
+                        <div class="framework-count"><%= $Frameworks.MITRE %></div>
+                        <div class="framework-name">MITRE ATT&CK</div>
+                    </div>
+                    <div class="framework-item">
+                        <div class="framework-count"><%= $Frameworks.CIS %></div>
+                        <div class="framework-name">CIS Controls</div>
+                    </div>
+                    <div class="framework-item">
+                        <div class="framework-count"><%= $Frameworks.NIST %></div>
+                        <div class="framework-name">NIST 800-53</div>
+                    </div>
+                    <div class="framework-item">
+                        <div class="framework-count"><%= $Frameworks.STIG %></div>
+                        <div class="framework-name">STIG</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories and Top Issues -->
+        <div class="grid grid-2" style="margin-top: 24px;">
+            <!-- Category Breakdown -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Categories</span>
+                </div>
+                <ul class="category-list">
+                    <% foreach ($cat in $Categories) { %>
+                    <li class="category-item">
+                        <span class="category-name">
+                            <%= $cat.Category %>
+                            <% if ($cat.IsNew) { %><span class="badge badge-new">NEW</span><% } %>
+                        </span>
+                        <div class="category-bar">
+                            <div class="category-bar-fill <%= $cat.Color %>" style="width: <%= [math]::Min(100, $cat.Score) %>%;"></div>
+                        </div>
+                        <span class="category-count"><%= $cat.FindingCount %></span>
+                    </li>
+                    <% } %>
+                </ul>
+            </div>
+
+            <!-- Top Issues -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Top Issues</span>
+                </div>
+                <table class="findings-table">
+                    <thead>
+                        <tr>
+                            <th>Severity</th>
+                            <th>Rule</th>
+                            <th>Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% foreach ($finding in $TopFindings | Select-Object -First 10) { %>
+                        <tr>
+                            <td><span class="severity <%= $finding.Severity.ToLower() %>"></span> <%= $finding.Severity %></td>
+                            <td>
+                                <span class="rule-id"><%= $finding.RuleId %></span><br>
+                                <%= $finding.RuleName %>
+                            </td>
+                            <td><%= $finding.FindingCount %></td>
+                        </tr>
+                        <% } %>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <% if (-not $State.HasEntraID) { %>
+        <!-- Entra ID Prompt -->
+        <div class="entra-prompt" style="margin-top: 24px;">
+            <span class="entra-prompt-icon">&#9729;</span>
+            <span class="entra-prompt-text">
+                <strong>Entra ID not connected.</strong>
+                Connect to Microsoft Graph to scan cloud identity configurations and get additional security findings.
+            </span>
+        </div>
+        <% } %>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div>
+                <span>Scan: <%= $Meta.ScanTime.ToString('yyyy-MM-dd HH:mm:ss') %></span>
+                <span style="margin-left: 16px;">Version: <%= $Meta.Version %></span>
+            </div>
+            <div>
+                <% if ($EnableAutoRefresh) { %>
+                <span class="auto-refresh">
+                    <span class="auto-refresh-dot"></span>
+                    Auto-refresh: <%= $RefreshSeconds %>s
+                </span>
+                <% } %>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/dashboard.js"></script>
+</body>
+</html>
