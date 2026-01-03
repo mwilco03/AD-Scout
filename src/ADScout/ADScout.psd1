@@ -11,6 +11,9 @@
     CompatiblePSEditions = @('Desktop', 'Core')
 
     FunctionsToExport = @(
+        # Initialization
+        'Initialize-ADScout'
+
         # Core scanning
         'Invoke-ADScoutScan'
         'Get-ADScoutRule'
@@ -60,6 +63,8 @@
             IconUri      = ''
             ReleaseNotes = @'
 ## v0.2.0 - Live Dashboard & Entra ID Release
+- Added Initialize-ADScout for guided setup with environment auto-detection
+- Entra ID SSO authentication (interactive browser or device code flow)
 - Added interactive web dashboard using PSP (PowerShell Server Pages)
 - Three persona-based views: Auditor, Manager, Technician
 - Baseline comparison with trend tracking
@@ -70,6 +75,7 @@
 - API endpoints for programmatic access
 - Microsoft Graph / Entra ID integration
 - Baseline storage and comparison
+- New initialization: Initialize-ADScout (auto-detect domain, modules, connectivity)
 - New dashboard commands: Show-ADScoutDashboard, Stop-ADScoutDashboard, Get-ADScoutDashboard
 - New baseline commands: Update-ADScoutHistory, Export/Import/Compare-ADScoutBaseline
 - New Graph commands: Connect/Disconnect/Test-ADScoutGraph

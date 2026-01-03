@@ -833,3 +833,180 @@ Invoke-ADScoutScan | Write-ADScoutEventLog
 - Prompts build on each other but can be partially implemented
 - Schema versions allow for future migration
 - All features should maintain backward compatibility with existing usage
+
+---
+
+## Additional Considerations (Not in Original Request)
+
+These items emerged during implementation and are important for production readiness:
+
+### 1. Pre-Flight Validation
+
+**Why needed:** Users often run scans without proper permissions or connectivity, leading to partial/failed scans with confusing errors.
+
+```powershell
+function Test-ADScoutPrerequisites {
+    # Check AD module available
+    # Verify DC connectivity (Test-ComputerSecureChannel or LDAP bind)
+    # Validate current user has read permissions
+    # Check for Entra ID token if -IncludeEntraID
+    # Verify output paths are writable
+    # Return structured results with recommendations
+}
+```
+
+**Auto-detect values:**
+- `$env:LOGONSERVER` → Default DC
+- `$env:USERDNSDOMAIN` → Domain FQDN
+- `(Get-ADDomain).PDCEmulator` → Reliable DC for queries
+- Current user's group memberships → Permission level
+
+### 2. Credential Management
+
+**Why needed:** Multi-domain assessments and Entra ID require different credentials. Current approach requires passing credentials repeatedly.
+
+Considerations:
+- **Never store plaintext credentials**
+- Use Windows Credential Manager or SecretManagement module
+- Support for Azure Key Vault integration
+- Token refresh for long-running dashboard sessions
+
+```powershell
+function Register-ADScoutCredential {
+    # -Name "contoso-admin" -Target "contoso.com" -Credential (Get-Credential)
+    # Stores in Windows Credential Manager or cross-platform secret store
+}
+
+function Get-ADScoutCredential {
+    # -Name "contoso-admin"
+    # Retrieves from secure storage
+}
+```
+
+### 3. Multi-Domain/Forest Support
+
+**Why needed:** Enterprise environments have multiple domains. Current single-domain focus limits usefulness.
+
+Considerations:
+- Forest-wide scanning with trust traversal
+- Per-domain baselines and history
+- Cross-domain permission analysis
+- Aggregated scoring across forest
+
+```powershell
+Invoke-ADScoutScan -Forest  # Scan all domains in forest
+Invoke-ADScoutScan -Domain "child.contoso.com", "partner.corp"  # Multi-domain
+```
+
+### 4. Offline/Air-Gapped Mode
+
+**Why needed:** Secure environments may not allow tools to run on DCs. Need collect-then-analyze workflow.
+
+```powershell
+# On domain-joined machine (collect)
+Export-ADScoutData -Path ./collected-data.zip
+
+# On analysis workstation (analyze)
+Invoke-ADScoutScan -OfflineData ./collected-data.zip
+```
+
+Data collection would use:
+- `Get-ADUser`, `Get-ADGroup`, `Get-ADComputer` exports
+- GPO backup exports
+- NTDS.dit analysis (read-only)
+- Registry exports from DCs
+
+### 5. Long-Running Scan Management
+
+**Why needed:** Large domains can take hours. Need progress, resume, and graceful cancellation.
+
+Considerations:
+- Progress indicators (X of Y rules, % complete)
+- Resume capability if interrupted
+- Graceful CTRL+C handling (save partial results)
+- Background job support
+
+```powershell
+$job = Start-ADScoutScan -AsJob -Domain "large.corp"
+Get-ADScoutScanProgress -Job $job  # 45% complete, 23/51 rules
+Stop-ADScoutScan -Job $job -SavePartial
+```
+
+### 6. Rule Dependency Resolution
+
+**Why needed:** Some rules depend on data from other rules. Currently no guarantee of execution order.
+
+Example: `P-AdminCount` depends on knowing who's in privileged groups, which `P-PrivilegedGroupMembers` detects.
+
+```powershell
+# Rule metadata addition
+@{
+    RuleId = 'P-AdminCount'
+    DependsOn = @('P-PrivilegedGroupMembers')  # Run this first
+}
+```
+
+### 7. Audit Logging
+
+**Why needed:** Compliance requires logging who ran what scans when.
+
+```powershell
+# Automatic logging to $HOME/.adscout/audit.log
+# 2026-01-03T10:15:00Z | SCAN_START | user=CONTOSO\admin | domain=contoso.com
+# 2026-01-03T10:45:00Z | SCAN_COMPLETE | findings=120 | score=45
+# 2026-01-03T10:46:00Z | EXPORT | format=HTML | path=./report.html
+```
+
+### 8. Rate Limiting / Throttling
+
+**Why needed:** Large scans can impact DC performance. Need configurable throttling.
+
+```powershell
+Initialize-ADScout -ThrottleLimit 10 -DelayBetweenQueries 100ms
+# Or via config
+Set-ADScoutConfig -QueryThrottle "Conservative"  # Slow but safe
+Set-ADScoutConfig -QueryThrottle "Aggressive"    # Fast, more DC load
+```
+
+### 9. Localization
+
+**Why needed:** Non-English environments have different group names, OU names, etc.
+
+Considerations:
+- Well-known SIDs vs names (use SIDs for reliability)
+- Report output language selection
+- Date/time formatting per locale
+
+```powershell
+Export-ADScoutReport -Language "de-DE"  # German output
+```
+
+### 10. Schema Version Migration
+
+**Why needed:** As config/baseline schemas evolve, need automated migration.
+
+```powershell
+# Automatic on load
+if ($config.SchemaVersion -lt $CurrentSchemaVersion) {
+    $config = Update-ADScoutConfigSchema -Config $config
+    Save-ADScoutConfig $config
+    Write-Warning "Configuration migrated to schema v$CurrentSchemaVersion"
+}
+```
+
+---
+
+## Priority Matrix (Additional Items)
+
+| Item | Priority | Effort | Impact |
+|------|----------|--------|--------|
+| Pre-Flight Validation | High | Low | High - reduces support issues |
+| Credential Management | High | Medium | High - security critical |
+| Multi-Domain Support | Medium | High | High - enterprise value |
+| Offline Mode | Medium | High | Medium - niche but critical |
+| Long-Running Management | Medium | Medium | Medium - UX improvement |
+| Rule Dependencies | Low | Medium | Low - edge cases |
+| Audit Logging | Medium | Low | Medium - compliance |
+| Rate Limiting | Medium | Low | Medium - DC protection |
+| Localization | Low | High | Low - most users English |
+| Schema Migration | High | Low | High - prevents data loss |
