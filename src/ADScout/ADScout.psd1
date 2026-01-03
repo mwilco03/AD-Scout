@@ -23,6 +23,17 @@
         'Get-ADScoutRemediation'
         'Show-ADScoutDashboard'
 
+        # Remediation automation
+        'Invoke-ADScoutRemediation'
+        'Undo-ADScoutRemediation'
+        'Get-ADScoutRemediationHistory'
+
+        # Change management integration
+        'Register-ADScoutChangeManagement'
+        'Get-ADScoutChangeManagement'
+        'New-ADScoutChangeTicket'
+        'Update-ADScoutChangeTicket'
+
         # Configuration
         'Set-ADScoutConfig'
         'Get-ADScoutConfig'
