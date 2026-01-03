@@ -4,6 +4,10 @@ function Save-ADScoutBaseline {
         Saves current scan results as a baseline for future comparisons.
 
     .DESCRIPTION
+        DEPRECATED: This function is a wrapper for Export-ADScoutBaseline.
+        Please use Export-ADScoutBaseline directly for more options including
+        multiple formats (JSON, CSV, CLIXML, XML) and compression.
+
         Creates a baseline file from the current scan results. This baseline
         can be used with Show-ADScoutDashboard to track security posture
         changes over time.
@@ -24,18 +28,15 @@ function Save-ADScoutBaseline {
         Runs a scan and saves results as the baseline.
 
     .EXAMPLE
-        Save-ADScoutBaseline -Results $results -Path ./baselines/2025-01.json
-        Saves existing results to a specific path.
-
-    .EXAMPLE
-        Save-ADScoutBaseline -Force
-        Runs a scan and overwrites any existing baseline.
+        # Preferred: Use Export-ADScoutBaseline directly
+        Invoke-ADScoutScan | Export-ADScoutBaseline -Path ./baseline.json
 
     .OUTPUTS
         String path to the saved baseline file.
 
     .NOTES
         Author: AD-Scout Contributors
+        This function is deprecated. Use Export-ADScoutBaseline instead.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -50,6 +51,7 @@ function Save-ADScoutBaseline {
     )
 
     begin {
+        Write-Warning "Save-ADScoutBaseline is deprecated. Use Export-ADScoutBaseline for more options (formats, compression)."
         $allResults = @()
     }
 
@@ -71,67 +73,24 @@ function Save-ADScoutBaseline {
             return
         }
 
-        # Check if file exists
-        if ((Test-Path $Path) -and -not $Force) {
-            if (-not $PSCmdlet.ShouldProcess($Path, "Overwrite existing baseline")) {
-                Write-Warning "Baseline file already exists at: $Path"
-                Write-Host "Use -Force to overwrite or specify a different -Path" -ForegroundColor Gray
-                return
-            }
+        # Delegate to Export-ADScoutBaseline
+        $exportParams = @{
+            Results = $allResults
+            Path    = $Path
+            Format  = 'json'
         }
 
-        # Get dashboard data for proper formatting
-        $dashboardData = Get-DashboardData -Results $allResults
-
-        # Build baseline object
-        $baseline = @{
-            meta = @{
-                generatedAt = (Get-Date).ToString('o')
-                domain = $env:USERDNSDOMAIN
-                version = $script:ADScoutVersion
-                type = 'baseline'
-            }
-            summary = @{
-                totalScore = $dashboardData.Summary.TotalScore
-                normalizedScore = $dashboardData.Summary.NormalizedScore
-                totalFindings = $dashboardData.Summary.TotalFindings
-                rulesWithFindings = $dashboardData.Summary.RulesWithFindings
-                grade = $dashboardData.Summary.Grade
-            }
-            categories = @($dashboardData.Categories | ForEach-Object {
-                @{
-                    category = $_.Category
-                    findingCount = $_.FindingCount
-                    score = $_.Score
-                }
-            })
-            results = @($allResults | ForEach-Object {
-                @{
-                    ruleId = $_.RuleId
-                    ruleName = $_.RuleName
-                    category = $_.Category
-                    score = $_.Score
-                    findingCount = $_.FindingCount
-                    description = $_.Description
-                }
-            })
+        if ($Force) {
+            $exportParams['Force'] = $true
         }
 
-        # Ensure directory exists
-        $directory = Split-Path $Path -Parent
-        if ($directory -and -not (Test-Path $directory)) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        try {
+            Export-ADScoutBaseline @exportParams
+            return $Path
         }
-
-        # Save baseline
-        $baseline | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Encoding UTF8
-
-        Write-Host "Baseline saved to: $Path" -ForegroundColor Green
-        Write-Host "  Score: $($dashboardData.Summary.NormalizedScore)/100 (Grade: $($dashboardData.Summary.Grade))" -ForegroundColor Gray
-        Write-Host "  Total Findings: $($dashboardData.Summary.TotalFindings)" -ForegroundColor Gray
-        Write-Host "  Rules Triggered: $($dashboardData.Summary.RulesWithFindings)" -ForegroundColor Gray
-
-        return $Path
+        catch {
+            Write-Error "Failed to save baseline: $_"
+        }
     }
 }
 

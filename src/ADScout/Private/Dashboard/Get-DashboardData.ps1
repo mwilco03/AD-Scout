@@ -8,12 +8,15 @@ function Get-DashboardData {
         formatted data structures for the dashboard views (Auditor, Manager, Technician).
         Calculates scores, trends, comparisons, and category breakdowns.
 
+        Supports both legacy dashboard baselines and Export-ADScoutBaseline format.
+
     .PARAMETER Results
         Array of ADScoutResult objects from Invoke-ADScoutScan.
 
     .PARAMETER BaselinePath
-        Path to baseline JSON file for comparison. If not provided,
+        Path to baseline file for comparison. If not provided,
         attempts to find adscout-baseline.json in current directory.
+        Supports JSON, CLIXML, and compressed formats.
 
     .PARAMETER HistoryPath
         Path to scan history file for trend analysis.
@@ -101,18 +104,47 @@ function Get-DashboardData {
 
     if ($BaselinePath -and (Test-Path $BaselinePath)) {
         try {
-            $baselineContent = Get-Content $BaselinePath -Raw | ConvertFrom-Json
+            # Load baseline using Import-ADScoutBaseline if available, otherwise parse JSON
+            $baselineContent = $null
+            if (Get-Command -Name Import-ADScoutBaseline -ErrorAction SilentlyContinue) {
+                $baselineContent = Import-ADScoutBaseline -Path $BaselinePath
+            } else {
+                $baselineContent = Get-Content $BaselinePath -Raw | ConvertFrom-Json
+            }
+
             $baseline = $baselineContent
             $isFirstRun = $false
 
-            # Calculate comparison
-            $baselineScore = if ($baselineContent.summary) {
-                $baselineContent.summary.normalizedScore
+            # Detect baseline schema and normalize
+            # New schema (Export-ADScoutBaseline): has Version, Summary.TotalScore, Rules[]
+            # Legacy schema (Save-ADScoutBaseline): has meta, summary.normalizedScore, results[]
+            $isNewSchema = $null -ne $baselineContent.Version -or $null -ne $baselineContent.Rules
+
+            if ($isNewSchema) {
+                # New Export-ADScoutBaseline format
+                $baselineTotalScore = $baselineContent.Summary.TotalScore
+                $baselineRules = $baselineContent.Rules
+                $baselineDate = $baselineContent.CreatedAt
+                $baselineCategories = @($baselineRules | ForEach-Object { $_.Category } | Select-Object -Unique)
+
+                # Calculate normalized score from baseline if not stored
+                # (In new schema, we store TotalScore not NormalizedScore)
+                $baselineMaxScore = ($baselineRules | Measure-Object -Property Score -Sum).Sum
+                if ($baselineMaxScore -gt 0 -and $maxPossibleScore -gt 0) {
+                    $baselineNormalized = [math]::Round(100 - (($baselineTotalScore / $maxPossibleScore) * 100))
+                } else {
+                    $baselineNormalized = 100
+                }
             } else {
-                0
+                # Legacy Save-ADScoutBaseline format
+                $baselineTotalScore = if ($baselineContent.summary.totalScore) { $baselineContent.summary.totalScore } else { 0 }
+                $baselineNormalized = if ($baselineContent.summary.normalizedScore) { $baselineContent.summary.normalizedScore } else { 100 }
+                $baselineRules = $baselineContent.results
+                $baselineDate = if ($baselineContent.meta) { $baselineContent.meta.generatedAt } else { $null }
+                $baselineCategories = @($baselineRules | ForEach-Object { $_.category } | Select-Object -Unique)
             }
 
-            $scoreDelta = $normalizedScore - $baselineScore
+            $scoreDelta = $normalizedScore - $baselineNormalized
 
             $comparison = @{
                 IsFirstRun = $false
@@ -126,20 +158,22 @@ function Get-DashboardData {
                 NewFindings = 0
                 ResolvedFindings = 0
                 NewCategories = @()
-                BaselineDate = if ($baselineContent.meta) { $baselineContent.meta.generatedAt } else { $null }
-                BaselineScore = $baselineScore
+                BaselineDate = $baselineDate
+                BaselineScore = $baselineNormalized
             }
 
-            # Compare findings
-            if ($baselineContent.results) {
-                $baselineRuleIds = @($baselineContent.results | ForEach-Object { $_.ruleId })
+            # Compare findings - handle both schemas
+            if ($baselineRules) {
+                # Get rule IDs - handle both casing conventions
+                $baselineRuleIds = @($baselineRules | ForEach-Object {
+                    if ($_.RuleId) { $_.RuleId } else { $_.ruleId }
+                })
                 $currentRuleIds = @($Results | ForEach-Object { $_.RuleId })
 
                 $comparison.NewFindings = ($currentRuleIds | Where-Object { $_ -notin $baselineRuleIds }).Count
                 $comparison.ResolvedFindings = ($baselineRuleIds | Where-Object { $_ -notin $currentRuleIds }).Count
 
                 # Detect new categories
-                $baselineCategories = @($baselineContent.results | ForEach-Object { $_.category } | Select-Object -Unique)
                 $currentCategories = @($Results | ForEach-Object { $_.Category } | Select-Object -Unique)
                 $comparison.NewCategories = @($currentCategories | Where-Object { $_ -notin $baselineCategories })
             }
@@ -366,71 +400,32 @@ function Get-DashboardData {
     return $dashboardData
 }
 
-function Save-ADScoutBaseline {
-    <#
-    .SYNOPSIS
-        Saves current scan results as a baseline for future comparisons.
-
-    .PARAMETER Results
-        Array of ADScoutResult objects from Invoke-ADScoutScan.
-
-    .PARAMETER Path
-        Output path for the baseline JSON file.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [PSCustomObject[]]$Results,
-
-        [Parameter()]
-        [string]$Path = (Join-Path $PWD 'adscout-baseline.json')
-    )
-
-    $dashboardData = Get-DashboardData -Results $Results
-
-    $baseline = @{
-        meta = @{
-            generatedAt = (Get-Date).ToString('o')
-            domain = $env:USERDNSDOMAIN
-            version = $script:ADScoutVersion ?? '0.2.0'
-            type = 'baseline'
-        }
-        summary = @{
-            totalScore = $dashboardData.Summary.TotalScore
-            normalizedScore = $dashboardData.Summary.NormalizedScore
-            totalFindings = $dashboardData.Summary.TotalFindings
-            rulesWithFindings = $dashboardData.Summary.RulesWithFindings
-        }
-        results = $Results | ForEach-Object {
-            @{
-                ruleId = $_.RuleId
-                ruleName = $_.RuleName
-                category = $_.Category
-                score = $_.Score
-                findingCount = $_.FindingCount
-            }
-        }
-    }
-
-    $baseline | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Encoding UTF8
-    Write-Verbose "Baseline saved to: $Path"
-
-    return $Path
-}
-
 function Update-ADScoutHistory {
     <#
     .SYNOPSIS
         Appends current scan to history file for trend tracking.
 
+    .DESCRIPTION
+        Maintains a rolling history of scan summaries for dashboard trend visualization.
+        This is separate from baseline comparison - it tracks score over time.
+
     .PARAMETER Results
         Array of ADScoutResult objects from Invoke-ADScoutScan.
 
     .PARAMETER Path
-        Path to history JSON file.
+        Path to history JSON file. Defaults to adscout-history.json in current directory.
 
     .PARAMETER MaxEntries
-        Maximum number of history entries to keep.
+        Maximum number of history entries to keep. Oldest entries are removed when exceeded.
+
+    .EXAMPLE
+        Invoke-ADScoutScan | Update-ADScoutHistory
+
+    .EXAMPLE
+        Update-ADScoutHistory -Results $results -MaxEntries 100
+
+    .OUTPUTS
+        String path to the updated history file.
     #>
     [CmdletBinding()]
     param(
@@ -460,8 +455,10 @@ function Update-ADScoutHistory {
     $entry = @{
         timestamp = (Get-Date).ToString('o')
         score = $dashboardData.Summary.NormalizedScore
+        totalScore = $dashboardData.Summary.TotalScore
         totalFindings = $dashboardData.Summary.TotalFindings
         rulesWithFindings = $dashboardData.Summary.RulesWithFindings
+        grade = $dashboardData.Summary.Grade
     }
 
     $history = @($history) + @($entry)
@@ -472,7 +469,7 @@ function Update-ADScoutHistory {
     }
 
     $history | ConvertTo-Json -Depth 5 | Set-Content -Path $Path -Encoding UTF8
-    Write-Verbose "History updated: $Path"
+    Write-Verbose "History updated: $Path ($($history.Count) entries)"
 
     return $Path
 }
