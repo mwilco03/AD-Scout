@@ -49,12 +49,31 @@ Describe 'ADScout Module' {
                 'Invoke-ADScoutRemediation'
                 'Undo-ADScoutRemediation'
                 'Get-ADScoutRemediationHistory'
+                'Resume-ADScoutRemediation'
+                'Get-ADScoutRemediationQueue'
+                'Export-ADScoutRemediationReport'
+                'Send-ADScoutRemediationToSIEM'
 
                 # Change management integration
                 'Register-ADScoutChangeManagement'
                 'Get-ADScoutChangeManagement'
                 'New-ADScoutChangeTicket'
                 'Update-ADScoutChangeTicket'
+
+                # Notifications
+                'Register-ADScoutNotification'
+                'Get-ADScoutNotification'
+                'Send-ADScoutNotification'
+
+                # Rollback management
+                'Set-ADScoutRollbackPolicy'
+                'Get-ADScoutRollbackPolicy'
+                'Invoke-ADScoutRollbackCleanup'
+
+                # Scope and environment
+                'Get-ADScoutRemediationScope'
+                'Set-ADScoutRemediationScope'
+                'Test-ADScoutEnvironment'
 
                 # Configuration
                 'Set-ADScoutConfig'
