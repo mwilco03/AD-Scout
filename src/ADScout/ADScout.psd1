@@ -37,7 +37,6 @@
         'Test-ADScoutGraphConnection'
 
         # Baseline and history
-        'Save-ADScoutBaseline'
         'Update-ADScoutHistory'
         'Export-ADScoutBaseline'
         'Import-ADScoutBaseline'
@@ -72,7 +71,7 @@
 - Microsoft Graph / Entra ID integration
 - Baseline storage and comparison
 - New dashboard commands: Show-ADScoutDashboard, Stop-ADScoutDashboard, Get-ADScoutDashboard
-- New baseline commands: Save-ADScoutBaseline, Update-ADScoutHistory, Export/Import/Compare-ADScoutBaseline
+- New baseline commands: Update-ADScoutHistory, Export/Import/Compare-ADScoutBaseline
 - New Graph commands: Connect/Disconnect/Test-ADScoutGraph
 '@
             Prerelease   = 'beta'
