@@ -385,9 +385,8 @@ The `[adsisearcher]` approach works on **any domain-joined machine** with standa
 
 #### Future Extensions
 
-- Historical baseline storage for trend analysis
-- Event log integration (optional module)
-- Machine learning anomaly scoring
+- [x] Historical baseline storage for trend analysis
+- [ ] Event log integration (optional module)
 
 ---
 
@@ -492,17 +491,17 @@ We are not a fork, port, or derivative work. We are a new tool that applies less
 - [x] PowerShell 5.1 support
 - [x] Tab completion for all parameters
 
-### Phase 2: Parity
-- [ ] Additional rules implemented
+### Phase 2: Parity ✅
+- [x] Additional rules implemented
 - [ ] PSWriteHTML integration
 - [ ] PowerShell 7.x parallel scanning
-- [ ] JSON/SARIF export
-- [ ] Remediation script generation
+- [x] JSON/SARIF export
+- [x] Remediation script generation
 
-### Phase 3: Innovation
-- [ ] Differential scanning / baselines
+### Phase 3: Innovation (In Progress)
+- [x] Differential scanning / baselines
 - [ ] Live dashboard
-- [ ] Microsoft Graph integration (Entra ID)
+- [x] Microsoft Graph integration (Entra ID)
 - [ ] Community rule gallery
 - [ ] Impact analysis
 
