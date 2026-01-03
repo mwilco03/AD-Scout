@@ -115,12 +115,11 @@ function Export-ADScoutBaseline {
             # Generate hash for each finding for change detection
             if ($result.Findings) {
                 foreach ($finding in $result.Findings) {
-                    # Create deterministic hash from finding properties
-                    $hashInput = $finding | ConvertTo-Json -Compress -Depth 3
-                    $hashBytes = [System.Text.Encoding]::UTF8.GetBytes($hashInput)
-                    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-                    $hash = [Convert]::ToBase64String($sha256.ComputeHash($hashBytes)).Substring(0, 16)
-                    $findingHashes += $hash
+                    # Use centralized fingerprint helper for deterministic hashing
+                    $hash = Get-ADScoutFingerprint -InputObject $finding
+                    if ($hash) {
+                        $findingHashes += $hash
+                    }
                 }
             }
 

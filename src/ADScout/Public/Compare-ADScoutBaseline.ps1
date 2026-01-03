@@ -72,15 +72,14 @@ function Compare-ADScoutBaseline {
 
             $baselineRule = $baselineRules[$ruleId]
 
-            # Generate hashes for current findings
+            # Generate hashes for current findings using centralized helper
             $currentHashes = @()
             if ($result.Findings) {
                 foreach ($finding in $result.Findings) {
-                    $hashInput = $finding | ConvertTo-Json -Compress -Depth 3
-                    $hashBytes = [System.Text.Encoding]::UTF8.GetBytes($hashInput)
-                    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-                    $hash = [Convert]::ToBase64String($sha256.ComputeHash($hashBytes)).Substring(0, 16)
-                    $currentHashes += $hash
+                    $hash = Get-ADScoutFingerprint -InputObject $finding
+                    if ($hash) {
+                        $currentHashes += $hash
+                    }
                 }
             }
 

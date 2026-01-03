@@ -91,12 +91,8 @@ function Set-ADScoutConfig {
         }
 
         if ($Persist -and $changes.Count -gt 0) {
-            $configPath = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.adscout/config.json'
-            $configDir = Split-Path $configPath -Parent
-
-            if (-not (Test-Path $configDir)) {
-                New-Item -Path $configDir -ItemType Directory -Force | Out-Null
-            }
+            # Use centralized config path helper
+            $configPath = Get-ADScoutConfigPath -CreateDirectory
 
             if (Test-Path $configPath) {
                 $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json -AsHashtable
@@ -109,7 +105,8 @@ function Set-ADScoutConfig {
                 $existingConfig[$key] = $changes[$key]
             }
 
-            $existingConfig | ConvertTo-Json -Depth 10 | Out-File $configPath -Encoding UTF8
+            $jsonDepth = if ($script:ADScoutConstants) { $script:ADScoutConstants.JsonDefaults.DefaultDepth } else { 10 }
+            $existingConfig | ConvertTo-Json -Depth $jsonDepth | Out-File $configPath -Encoding UTF8
 
             Write-Verbose "Configuration saved to: $configPath"
         }

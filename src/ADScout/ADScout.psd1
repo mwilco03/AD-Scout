@@ -10,6 +10,12 @@
     PowerShellVersion = '5.1'
     CompatiblePSEditions = @('Desktop', 'Core')
 
+    # Optional modules - loaded on demand when features are used
+    # ActiveDirectory: Required for AD cmdlet-based collection (falls back to ADSI if unavailable)
+    # GroupPolicy: Required for GPO scanning features
+    # Microsoft.Graph.*: Required for Entra ID/Microsoft Graph integration
+    # Note: These are not hard requirements - the module degrades gracefully if unavailable
+
     FunctionsToExport = @(
         # Core scanning
         'Invoke-ADScoutScan'

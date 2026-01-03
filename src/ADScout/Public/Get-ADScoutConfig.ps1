@@ -36,7 +36,8 @@ function Get-ADScoutConfig {
     [OutputType([PSCustomObject])]
     param(
         [Parameter()]
-        [ValidateSet('ParallelThrottleLimit', 'DefaultReporter', 'RulePaths', 'CacheTTL', 'LogLevel')]
+        [ValidateSet('ParallelThrottleLimit', 'DefaultReporter', 'RulePaths', 'CacheTTL', 'LogLevel',
+                     'DefaultDomain', 'DefaultServer', 'ExcludedRules', 'ReportOutputPath')]
         [string]$Name,
 
         [Parameter()]
@@ -51,10 +52,15 @@ function Get-ADScoutConfig {
             RulePaths            = $script:ADScoutConfig.RulePaths
             CacheTTL             = $script:ADScoutConfig.CacheTTL
             LogLevel             = $script:ADScoutConfig.LogLevel
+            DefaultDomain        = $script:ADScoutConfig.DefaultDomain
+            DefaultServer        = $script:ADScoutConfig.DefaultServer
+            ExcludedRules        = $script:ADScoutConfig.ExcludedRules
+            ReportOutputPath     = $script:ADScoutConfig.ReportOutputPath
         }
 
         if ($IncludePersisted) {
-            $configPath = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.adscout/config.json'
+            # Use centralized config path helper
+            $configPath = Get-ADScoutConfigPath
 
             if (Test-Path $configPath) {
                 try {
