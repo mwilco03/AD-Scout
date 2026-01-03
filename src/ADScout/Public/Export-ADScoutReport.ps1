@@ -22,6 +22,14 @@ function Export-ADScoutReport {
     .PARAMETER IncludeRemediation
         Include remediation scripts in the output.
 
+    .PARAMETER BaselineComparison
+        Baseline comparison object from Compare-ADScoutBaseline. When provided with HTML format,
+        adds a baseline comparison section showing score changes and trend visualization.
+
+    .PARAMETER TrendHistory
+        Array of historical scan data points for trend visualization. Each object should have
+        Date and Score properties. Used with HTML format to display score progression over time.
+
     .PARAMETER PassThru
         Return the results object in addition to exporting.
 
@@ -61,6 +69,12 @@ function Export-ADScoutReport {
 
         [Parameter()]
         [switch]$IncludeRemediation,
+
+        [Parameter()]
+        [PSCustomObject]$BaselineComparison,
+
+        [Parameter()]
+        [PSCustomObject[]]$TrendHistory,
 
         [Parameter()]
         [switch]$PassThru
@@ -181,7 +195,19 @@ function Export-ADScoutReport {
                 $reporterPath = Join-Path $PSScriptRoot '..\Reporters\HTMLReporter.ps1'
                 if (Test-Path $reporterPath) {
                     . $reporterPath
-                    Export-ADScoutHTMLReport -Results $allResults -Path $Path -Title $Title -IncludeRemediation:$IncludeRemediation
+                    $htmlParams = @{
+                        Results = $allResults
+                        Path = $Path
+                        Title = $Title
+                        IncludeRemediation = $IncludeRemediation
+                    }
+                    if ($BaselineComparison) {
+                        $htmlParams['BaselineComparison'] = $BaselineComparison
+                    }
+                    if ($TrendHistory) {
+                        $htmlParams['TrendHistory'] = $TrendHistory
+                    }
+                    Export-ADScoutHTMLReport @htmlParams
                 }
                 else {
                     Write-Warning "HTML reporter not found. Use JSON or CSV format."
