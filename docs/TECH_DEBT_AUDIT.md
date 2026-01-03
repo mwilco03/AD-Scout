@@ -1,8 +1,31 @@
 # AD-Scout Technical Debt Audit Report
 
 **Audit Date:** 2026-01-03
+**Last Updated:** 2026-01-03
 **Module Version:** 0.1.0 (alpha)
 **Files Analyzed:** 287 PowerShell files
+
+---
+
+## Remediation Status
+
+| Priority | Issue | Status | Commit |
+|----------|-------|--------|--------|
+| **P0** | Fix function exports | ✅ **DONE** | `38d9980` |
+| **P0** | Load persisted config | ✅ **DONE** | `38d9980` |
+| **P0** | Add RequiredModules | ✅ **DONE** | `38d9980` |
+| **P1** | Extract fingerprint helper | ✅ **DONE** | `38d9980` |
+| **P1** | Create config path helper | ✅ **DONE** | `38d9980` |
+| **P1** | Add missing Set-ADScoutConfig params | ✅ **DONE** | Pending |
+| **P1** | Create tests for new helpers | ✅ **DONE** | Pending |
+| **P2** | Externalize SID mappings | ✅ **DONE** | `38d9980` |
+| **P2** | Create centralized constants | ✅ **DONE** | `38d9980` |
+| **P1** | Extract ACL validation module | ⏳ Pending | - |
+| **P1** | Extract DirectorySearcher utility | ⏳ Pending | - |
+| **P2** | Split Export-ADScoutReport | ⏳ Pending | - |
+| **P2** | Create SMB scanner utilities | ⏳ Pending | - |
+
+**Progress:** 9/13 items completed (69%)
 
 ---
 

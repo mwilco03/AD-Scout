@@ -19,6 +19,18 @@ function Set-ADScoutConfig {
     .PARAMETER LogLevel
         Logging verbosity level.
 
+    .PARAMETER DefaultDomain
+        Default domain to use for scans when not specified.
+
+    .PARAMETER DefaultServer
+        Default domain controller to use for queries.
+
+    .PARAMETER ExcludedRules
+        Array of rule IDs to exclude from scans.
+
+    .PARAMETER ReportOutputPath
+        Default output path for reports.
+
     .PARAMETER Persist
         Save settings to configuration file.
 
@@ -50,6 +62,18 @@ function Set-ADScoutConfig {
         [Parameter()]
         [ValidateSet('Error', 'Warning', 'Info', 'Verbose', 'Debug')]
         [string]$LogLevel,
+
+        [Parameter()]
+        [string]$DefaultDomain,
+
+        [Parameter()]
+        [string]$DefaultServer,
+
+        [Parameter()]
+        [string[]]$ExcludedRules,
+
+        [Parameter()]
+        [string]$ReportOutputPath,
 
         [Parameter()]
         [switch]$Persist
@@ -87,6 +111,38 @@ function Set-ADScoutConfig {
                 $script:ADScoutConfig.LogLevel = $LogLevel
                 $changes.LogLevel = $LogLevel
                 Write-Verbose "Set LogLevel to $LogLevel"
+            }
+        }
+
+        if ($PSBoundParameters.ContainsKey('DefaultDomain')) {
+            if ($PSCmdlet.ShouldProcess('DefaultDomain', "Set to $DefaultDomain")) {
+                $script:ADScoutConfig.DefaultDomain = $DefaultDomain
+                $changes.DefaultDomain = $DefaultDomain
+                Write-Verbose "Set DefaultDomain to $DefaultDomain"
+            }
+        }
+
+        if ($PSBoundParameters.ContainsKey('DefaultServer')) {
+            if ($PSCmdlet.ShouldProcess('DefaultServer', "Set to $DefaultServer")) {
+                $script:ADScoutConfig.DefaultServer = $DefaultServer
+                $changes.DefaultServer = $DefaultServer
+                Write-Verbose "Set DefaultServer to $DefaultServer"
+            }
+        }
+
+        if ($PSBoundParameters.ContainsKey('ExcludedRules')) {
+            if ($PSCmdlet.ShouldProcess('ExcludedRules', "Set to $($ExcludedRules -join ', ')")) {
+                $script:ADScoutConfig.ExcludedRules = $ExcludedRules
+                $changes.ExcludedRules = $ExcludedRules
+                Write-Verbose "Set ExcludedRules to $($ExcludedRules -join ', ')"
+            }
+        }
+
+        if ($PSBoundParameters.ContainsKey('ReportOutputPath')) {
+            if ($PSCmdlet.ShouldProcess('ReportOutputPath', "Set to $ReportOutputPath")) {
+                $script:ADScoutConfig.ReportOutputPath = $ReportOutputPath
+                $changes.ReportOutputPath = $ReportOutputPath
+                Write-Verbose "Set ReportOutputPath to $ReportOutputPath"
             }
         }
 
