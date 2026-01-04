@@ -30,6 +30,10 @@ function Export-ADScoutReport {
         Array of historical scan data points for trend visualization. Each object should have
         Date and Score properties. Used with HTML format to display score progression over time.
 
+    .PARAMETER SelfContained
+        For HTML format: Embed Chart.js library directly for offline viewing. Increases file
+        size by ~200KB but allows charts to render without internet access.
+
     .PARAMETER PassThru
         Return the results object in addition to exporting.
 
@@ -75,6 +79,9 @@ function Export-ADScoutReport {
 
         [Parameter()]
         [PSCustomObject[]]$TrendHistory,
+
+        [Parameter()]
+        [switch]$SelfContained,
 
         [Parameter()]
         [switch]$PassThru
@@ -206,6 +213,9 @@ function Export-ADScoutReport {
                     }
                     if ($TrendHistory) {
                         $htmlParams['TrendHistory'] = $TrendHistory
+                    }
+                    if ($SelfContained) {
+                        $htmlParams['SelfContained'] = $true
                     }
                     Export-ADScoutHTMLReport @htmlParams
                 }

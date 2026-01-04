@@ -33,12 +33,20 @@ function Export-ADScoutHTMLReport {
         have Date and Score properties. When provided, displays a line chart showing
         score progression over time.
 
+    .PARAMETER SelfContained
+        Embed Chart.js library directly in the HTML for offline viewing. Increases file
+        size by ~200KB but allows reports to work without internet access.
+
     .EXAMPLE
         Invoke-ADScoutScan | Export-ADScoutHTMLReport -Path ./report.html
 
     .EXAMPLE
         $results = Invoke-ADScoutScan
         Export-ADScoutHTMLReport -Results $results -Path ./report.html -IncludeRemediation
+
+    .EXAMPLE
+        # Offline-capable report with embedded Chart.js
+        Export-ADScoutHTMLReport -Results $results -Path ./report.html -SelfContained
 
     .EXAMPLE
         # With baseline comparison visualization
@@ -77,7 +85,10 @@ function Export-ADScoutHTMLReport {
         [PSCustomObject]$BaselineComparison,
 
         [Parameter()]
-        [PSCustomObject[]]$TrendHistory
+        [PSCustomObject[]]$TrendHistory,
+
+        [Parameter()]
+        [switch]$SelfContained
     )
 
     begin {
@@ -792,6 +803,31 @@ function Export-ADScoutHTMLReport {
             color: #fff;
         }
 
+        .category-filter {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            cursor: pointer;
+            min-width: 150px;
+        }
+
+        .category-filter:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .category-filter:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .filter-separator {
+            color: var(--text-muted);
+            padding: 0 0.5rem;
+        }
+
         .findings-list { display: flex; flex-direction: column; gap: 1rem; }
 
         .finding-card {
@@ -1451,8 +1487,35 @@ function Export-ADScoutHTMLReport {
             .finding-card { break-inside: avoid; }
             .charts-section { display: none; }
         }
+        .chart-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
+        }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+$(if ($SelfContained) {
+    # Attempt to download and embed Chart.js for offline use
+    $chartJsContent = $null
+    try {
+        Write-Verbose "Downloading Chart.js for self-contained report..."
+        $chartJsContent = (Invoke-WebRequest -Uri 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js' -UseBasicParsing -TimeoutSec 30).Content
+    } catch {
+        Write-Warning "Could not download Chart.js for embedding: $_"
+        Write-Warning "Falling back to CDN. Report may require internet access for charts."
+    }
+    if ($chartJsContent) {
+        "    <script>$chartJsContent</script>"
+    } else {
+        '    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+    }
+} else {
+    '    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+})
 </head>
 <body>
     <div class="container">
@@ -1631,6 +1694,13 @@ $(if ($blResults.Count -gt 0) {
                 <button class="filter-btn" data-severity="medium">Medium ($($mediumFindings.Count))</button>
                 <button class="filter-btn" data-severity="low">Low ($($lowFindings.Count))</button>
                 <button class="filter-btn" data-severity="info">Info ($($infoFindings.Count))</button>
+                <span class="filter-separator">|</span>
+                <select class="category-filter" onchange="filterByCategory(this.value)">
+                    <option value="">All Categories</option>
+$($categorySummary | ForEach-Object {
+    "                    <option value=`"$([System.Web.HttpUtility]::HtmlAttributeEncode($_.Name))`">$([System.Web.HttpUtility]::HtmlEncode($_.Name)) ($($_.FindingCount))</option>"
+} | Out-String)
+                </select>
             </div>
             <div class="findings-list">
                 $($findingsHtml -join "`n")
@@ -1691,6 +1761,13 @@ $(if ($blResults.Count -gt 0) {
 
         // Initialize charts when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
+            // Check if Chart.js loaded successfully
+            if (typeof Chart === 'undefined') {
+                document.querySelectorAll('.chart-wrapper').forEach(wrapper => {
+                    wrapper.innerHTML = '<div class="chart-fallback">Charts unavailable<br><small>(Chart.js library not loaded - check internet connection)</small></div>';
+                });
+                return;
+            }
             initSeverityChart();
             initCategoryChart();
             initTrendChart();
@@ -1915,6 +1992,10 @@ $(if ($TrendHistory) {
             const targetBtn = document.querySelector('.filter-btn[data-severity="' + severity + '"]');
             if (targetBtn) targetBtn.classList.add('active');
 
+            // Reset category dropdown
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = '';
+
             // Filter cards
             document.querySelectorAll('.finding-card').forEach(card => {
                 if (severity === 'all' || card.dataset.severity === severity) {
@@ -1938,20 +2019,26 @@ $(if ($TrendHistory) {
             const allBtn = document.querySelector('.filter-btn[data-severity="all"]');
             if (allBtn) allBtn.classList.add('active');
 
-            // Show only cards matching category
+            // Update category dropdown
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = category;
+
+            // Show cards matching category (or all if empty)
             document.querySelectorAll('.finding-card').forEach(card => {
-                if (card.dataset.category === category) {
+                if (!category || category === '' || card.dataset.category === category) {
                     card.style.display = 'block';
-                    card.classList.add('expanded'); // Auto-expand matching cards
+                    if (category) card.classList.add('expanded'); // Auto-expand when filtering
                 } else {
                     card.style.display = 'none';
                 }
             });
 
-            // Scroll to findings section
-            const findingsSection = document.querySelector('.findings-section');
-            if (findingsSection) {
-                findingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Scroll to findings section (only if filtering, not when showing all)
+            if (category) {
+                const findingsSection = document.querySelector('.findings-section');
+                if (findingsSection) {
+                    findingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             }
         }
 
@@ -1961,6 +2048,8 @@ $(if ($TrendHistory) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             const allBtn = document.querySelector('.filter-btn[data-severity="all"]');
             if (allBtn) allBtn.classList.add('active');
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = '';
             document.querySelectorAll('.finding-card').forEach(card => {
                 card.style.display = 'block';
             });
