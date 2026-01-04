@@ -89,7 +89,9 @@
                     try {
                         $dnsResult = [System.Net.Dns]::GetHostAddresses($dcHost)
                         $dcIPs = $dnsResult | ForEach-Object { $_.IPAddressToString }
-                    } catch { }
+                    } catch {
+                        Write-Verbose "S-DC-SubnetMissing: Could not resolve IP for $dcHost : $_"
+                    }
                 }
 
                 foreach ($ip in $dcIPs) {

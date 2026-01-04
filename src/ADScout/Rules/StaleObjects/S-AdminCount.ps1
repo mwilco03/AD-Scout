@@ -56,7 +56,9 @@
                 foreach ($member in $members) {
                     $privilegedMembers[$member.SamAccountName] = $true
                 }
-            } catch { }
+            } catch {
+                Write-Verbose "S-AdminCount: Could not enumerate members of $groupName : $_"
+            }
         }
 
         # Check each user with AdminCount = 1
