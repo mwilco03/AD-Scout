@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'PrivilegedAccess'
     Title       = 'Unconstrained Delegation Enabled'
-    Description = 'Detects computers (other than DCs) and users with unconstrained Kerberos delegation enabled. These systems can impersonate any user to any service, making them high-value targets for attackers.'
+    Description = 'Detects computers and users with unconstrained Kerberos delegation. Checks both delegation flags AND whether Protected Users group is used to mitigate delegation attacks on sensitive accounts.'
     Severity    = 'High'
     Weight      = 40
-    DataSource  = 'Computers'
+    DataSource  = 'Computers,Users,Groups'
 
     References  = @(
         @{ Title = 'Kerberos Delegation Overview'; Url = 'https://docs.microsoft.com/en-us/windows-server/security/kerberos/kerberos-constrained-delegation-overview' }
@@ -40,6 +40,89 @@
         $TRUSTED_FOR_DELEGATION = 524288
         $ACCOUNTDISABLE = 2
 
+        # ========================================================================
+        # BELT: Check if Protected Users group is being used
+        # Protected Users prevents delegation of credentials
+        # ========================================================================
+        $protectedUsersMembers = @()
+        $protectedUsersConfigured = $false
+
+        try {
+            # Get Protected Users group members
+            $protectedUsers = Get-ADGroupMember -Identity 'Protected Users' -ErrorAction SilentlyContinue
+            if ($protectedUsers) {
+                $protectedUsersMembers = $protectedUsers | ForEach-Object { $_.SamAccountName }
+                $protectedUsersConfigured = $protectedUsersMembers.Count -gt 0
+            }
+        } catch {
+            # Try LDAP fallback
+            try {
+                $rootDSE = [ADSI]"LDAP://RootDSE"
+                $defaultNC = $rootDSE.defaultNamingContext.ToString()
+                $searcher = New-Object DirectoryServices.DirectorySearcher
+                $searcher.SearchRoot = [ADSI]"LDAP://$defaultNC"
+                $searcher.Filter = "(&(objectClass=group)(cn=Protected Users))"
+                $searcher.PropertiesToLoad.Add('member') | Out-Null
+                $result = $searcher.FindOne()
+                if ($result -and $result.Properties['member']) {
+                    $protectedUsersMembers = $result.Properties['member'] | ForEach-Object {
+                        ($_ -split ',')[0] -replace 'CN=', ''
+                    }
+                    $protectedUsersConfigured = $protectedUsersMembers.Count -gt 0
+                }
+            } catch {
+                Write-Verbose "P-UnconstrainedDelegation: Could not check Protected Users group: $_"
+            }
+        }
+
+        # Check if Domain Admins are in Protected Users
+        $domainAdminsProtected = $false
+        try {
+            $domainAdmins = Get-ADGroupMember -Identity 'Domain Admins' -ErrorAction SilentlyContinue
+            $unprotectedAdmins = @()
+            foreach ($admin in $domainAdmins) {
+                if ($admin.SamAccountName -notin $protectedUsersMembers) {
+                    $unprotectedAdmins += $admin.SamAccountName
+                }
+            }
+            $domainAdminsProtected = $unprotectedAdmins.Count -eq 0
+        } catch {
+            Write-Verbose "P-UnconstrainedDelegation: Could not check Domain Admins protection: $_"
+        }
+
+        if (-not $protectedUsersConfigured) {
+            $findings += [PSCustomObject]@{
+                ObjectType          = 'Mitigation Gap'
+                Name                = 'Protected Users Group'
+                SamAccountName      = 'Protected Users'
+                DistinguishedName   = "CN=Protected Users,CN=Users,$defaultNC"
+                OperatingSystem     = 'N/A'
+                Enabled             = 'N/A'
+                Severity            = 'High'
+                Risk                = 'Protected Users group is empty - no delegation protection for sensitive accounts'
+                Impact              = 'Sensitive accounts can be delegated via unconstrained delegation'
+                AttackScenario      = 'Add Domain Admins to Protected Users to prevent credential delegation'
+                ConfigSource        = 'Group Membership'
+            }
+        } elseif ($unprotectedAdmins.Count -gt 0) {
+            $findings += [PSCustomObject]@{
+                ObjectType          = 'Mitigation Gap'
+                Name                = 'Unprotected Domain Admins'
+                SamAccountName      = $unprotectedAdmins -join ', '
+                DistinguishedName   = 'Multiple'
+                OperatingSystem     = 'N/A'
+                Enabled             = 'N/A'
+                Severity            = 'High'
+                Risk                = "Domain Admins not in Protected Users: $($unprotectedAdmins -join ', ')"
+                Impact              = 'These admin accounts can be delegated via unconstrained delegation'
+                AttackScenario      = 'Add these accounts to Protected Users group'
+                ConfigSource        = 'Group Membership'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check individual objects for unconstrained delegation
+        # ========================================================================
         try {
             # Check computers
             foreach ($computer in $Data.Computers) {

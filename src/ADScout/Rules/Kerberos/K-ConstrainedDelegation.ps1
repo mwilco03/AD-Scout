@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'Kerberos'
     Title       = 'Constrained Delegation to Sensitive Services'
-    Description = 'Accounts are configured with constrained delegation to sensitive services such as LDAP, CIFS, or HTTP on Domain Controllers. Attackers who compromise these accounts can impersonate any user to the delegated services, potentially leading to domain compromise.'
+    Description = 'Accounts with constrained delegation to sensitive services. Checks both delegation configuration AND whether sensitive accounts have "Account is sensitive and cannot be delegated" protection.'
     Severity    = 'High'
     Weight      = 25
-    DataSource  = 'Users'
+    DataSource  = 'Users,Computers'
 
     References  = @(
         @{ Title = 'Constrained Delegation Abuse'; Url = 'https://attack.mitre.org/techniques/T1558/003/' }
@@ -34,6 +34,78 @@
         param($Data, $Domain)
 
         $findings = @()
+
+        # ========================================================================
+        # BELT: Check if sensitive accounts have "Cannot be delegated" protection
+        # ========================================================================
+        # NOT_DELEGATED = 0x100000 = 1048576
+        $NOT_DELEGATED = 1048576
+
+        try {
+            # Check Domain Admins for delegation protection
+            $domainAdmins = Get-ADGroupMember -Identity 'Domain Admins' -Recursive -ErrorAction SilentlyContinue
+            $unprotectedAdmins = @()
+
+            foreach ($admin in $domainAdmins) {
+                if ($admin.objectClass -eq 'user') {
+                    $user = Get-ADUser -Identity $admin.SamAccountName -Properties UserAccountControl -ErrorAction SilentlyContinue
+                    if ($user -and -not ($user.UserAccountControl -band $NOT_DELEGATED)) {
+                        $unprotectedAdmins += $user.SamAccountName
+                    }
+                }
+            }
+
+            if ($unprotectedAdmins.Count -gt 0) {
+                $findings += [PSCustomObject]@{
+                    ObjectType          = 'Mitigation Gap'
+                    AccountName         = 'Domain Admins without delegation protection'
+                    AccountType         = 'Privileged Users'
+                    DistinguishedName   = 'Multiple'
+                    DelegationTargets   = 'N/A'
+                    SensitiveTargets    = 'N/A'
+                    DCTargets           = 'N/A'
+                    TargetsDCs          = $false
+                    RiskLevel           = 'High'
+                    AttackPath          = "Unprotected admins: $($unprotectedAdmins -join ', ')"
+                    ConfigSource        = 'Account Flag Missing'
+                }
+            }
+
+            # Check Enterprise Admins
+            $enterpriseAdmins = Get-ADGroupMember -Identity 'Enterprise Admins' -Recursive -ErrorAction SilentlyContinue
+            $unprotectedEA = @()
+
+            foreach ($admin in $enterpriseAdmins) {
+                if ($admin.objectClass -eq 'user') {
+                    $user = Get-ADUser -Identity $admin.SamAccountName -Properties UserAccountControl -ErrorAction SilentlyContinue
+                    if ($user -and -not ($user.UserAccountControl -band $NOT_DELEGATED)) {
+                        $unprotectedEA += $user.SamAccountName
+                    }
+                }
+            }
+
+            if ($unprotectedEA.Count -gt 0) {
+                $findings += [PSCustomObject]@{
+                    ObjectType          = 'Mitigation Gap'
+                    AccountName         = 'Enterprise Admins without delegation protection'
+                    AccountType         = 'Privileged Users'
+                    DistinguishedName   = 'Multiple'
+                    DelegationTargets   = 'N/A'
+                    SensitiveTargets    = 'N/A'
+                    DCTargets           = 'N/A'
+                    TargetsDCs          = $false
+                    RiskLevel           = 'Critical'
+                    AttackPath          = "Unprotected EA: $($unprotectedEA -join ', ')"
+                    ConfigSource        = 'Account Flag Missing'
+                }
+            }
+        } catch {
+            Write-Verbose "K-ConstrainedDelegation: Could not check admin delegation protection: $_"
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check accounts with constrained delegation to sensitive SPNs
+        # ========================================================================
 
         # Sensitive SPNs that are high-risk for delegation
         $sensitiveServices = @(
