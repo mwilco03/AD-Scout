@@ -3,7 +3,7 @@
     Version     = '1.0.0'
     Category    = 'Kerberos'
     Title       = 'Kerberoastable Service Accounts'
-    Description = 'Identifies user accounts with Service Principal Names (SPNs) that are vulnerable to Kerberoasting attacks. Attackers can request TGS tickets and crack passwords offline.'
+    Description = 'Identifies user accounts with Service Principal Names (SPNs) that are vulnerable to Kerberoasting attacks. Attackers can request TGS tickets and crack passwords offline. NOTE: Even if an account only supports AES, attackers may still request RC4 tickets if the KDC allows it - see K-RC4Encryption rule for KDC policy check.'
     Severity    = 'High'
     Weight      = 35
     DataSource  = 'Users'
