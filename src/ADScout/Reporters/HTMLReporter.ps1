@@ -23,12 +23,46 @@ function Export-ADScoutHTMLReport {
     .PARAMETER Domain
         Domain name to display in the report. Auto-detected if not specified.
 
+    .PARAMETER BaselineComparison
+        Baseline comparison object from Compare-ADScoutBaseline. When provided, adds
+        a baseline comparison section showing score changes, trend indicators, and
+        a trend chart comparing baseline vs current scores.
+
+    .PARAMETER TrendHistory
+        Array of historical scan data points for trend visualization. Each object should
+        have Date and Score properties. When provided, displays a line chart showing
+        score progression over time.
+
+    .PARAMETER SelfContained
+        Embed Chart.js library directly in the HTML for offline viewing. Increases file
+        size by ~200KB but allows reports to work without internet access.
+
     .EXAMPLE
         Invoke-ADScoutScan | Export-ADScoutHTMLReport -Path ./report.html
 
     .EXAMPLE
         $results = Invoke-ADScoutScan
         Export-ADScoutHTMLReport -Results $results -Path ./report.html -IncludeRemediation
+
+    .EXAMPLE
+        # Offline-capable report with embedded Chart.js
+        Export-ADScoutHTMLReport -Results $results -Path ./report.html -SelfContained
+
+    .EXAMPLE
+        # With baseline comparison visualization
+        $baseline = Import-ADScoutBaseline -Path ./baseline.json
+        $results = Invoke-ADScoutScan
+        $comparison = $results | Compare-ADScoutBaseline -Baseline $baseline -ShowResolved
+        Export-ADScoutHTMLReport -Results $results -Path ./report.html -BaselineComparison $comparison
+
+    .EXAMPLE
+        # With trend history for score tracking over time
+        $trendHistory = @(
+            @{ Date = '2024-01-15'; Score = 450 },
+            @{ Date = '2024-02-15'; Score = 380 },
+            @{ Date = '2024-03-15'; Score = 320 }
+        )
+        Export-ADScoutHTMLReport -Results $results -Path ./report.html -TrendHistory $trendHistory
     #>
     [CmdletBinding()]
     param(
@@ -45,7 +79,16 @@ function Export-ADScoutHTMLReport {
         [switch]$IncludeRemediation,
 
         [Parameter()]
-        [string]$Domain
+        [string]$Domain,
+
+        [Parameter()]
+        [PSCustomObject]$BaselineComparison,
+
+        [Parameter()]
+        [PSCustomObject[]]$TrendHistory,
+
+        [Parameter()]
+        [switch]$SelfContained
     )
 
     begin {
@@ -155,7 +198,7 @@ function Export-ADScoutHTMLReport {
 
         $categoryHtml = $categorySummary | ForEach-Object {
             @"
-            <div class="category-card $($_.Class)">
+            <div class="category-card $($_.Class) clickable" onclick="filterByCategory('$([System.Web.HttpUtility]::HtmlAttributeEncode($_.Name))')" title="Click to view $($_.Name) findings">
                 <div class="category-icon">$($_.Icon)</div>
                 <div class="category-info">
                     <h4>$([System.Web.HttpUtility]::HtmlEncode($_.Name))</h4>
@@ -760,6 +803,31 @@ function Export-ADScoutHTMLReport {
             color: #fff;
         }
 
+        .category-filter {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            cursor: pointer;
+            min-width: 150px;
+        }
+
+        .category-filter:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .category-filter:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .filter-separator {
+            color: var(--text-muted);
+            padding: 0 0.5rem;
+        }
+
         .findings-list { display: flex; flex-direction: column; gap: 1rem; }
 
         .finding-card {
@@ -1165,6 +1233,247 @@ function Export-ADScoutHTMLReport {
             color: var(--text-muted);
         }
 
+        /* Interactive Charts Section */
+        .charts-section {
+            margin-bottom: 2rem;
+        }
+
+        .charts-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        .chart-container {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .chart-container h3 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 280px;
+            width: 100%;
+        }
+
+        .chart-wrapper canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .chart-legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--radius-sm);
+            transition: background 0.2s;
+        }
+
+        .legend-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        /* Baseline Comparison Section */
+        .baseline-section {
+            margin-bottom: 2rem;
+        }
+
+        .baseline-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .baseline-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .baseline-stat {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            text-align: center;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .baseline-stat .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            display: block;
+        }
+
+        .baseline-stat .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-top: 0.25rem;
+        }
+
+        .baseline-stat .stat-delta {
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--radius-sm);
+            display: inline-block;
+        }
+
+        .baseline-stat .stat-delta.positive {
+            background: var(--critical-bg);
+            color: var(--critical);
+        }
+
+        .baseline-stat .stat-delta.negative {
+            background: var(--good-bg);
+            color: var(--good);
+        }
+
+        .baseline-stat .stat-delta.neutral {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-weight: 600;
+        }
+
+        .trend-indicator.improving { color: var(--good); }
+        .trend-indicator.worsening { color: var(--critical); }
+        .trend-indicator.stable { color: var(--text-secondary); }
+
+        .baseline-changes {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .baseline-changes h3 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+
+        .change-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .change-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .change-item:hover {
+            background: var(--bg-secondary);
+        }
+
+        .change-item.new { border-left: 3px solid var(--critical); }
+        .change-item.resolved { border-left: 3px solid var(--good); }
+        .change-item.degraded { border-left: 3px solid var(--warning); }
+        .change-item.improved { border-left: 3px solid var(--info); }
+
+        .change-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .change-rule {
+            font-weight: 500;
+        }
+
+        .change-category {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .change-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .change-status.new { background: var(--critical-bg); color: var(--critical); }
+        .change-status.resolved { background: var(--good-bg); color: var(--good); }
+        .change-status.degraded { background: var(--warning-bg); color: var(--warning); }
+        .change-status.improved { background: var(--info-bg); color: var(--info); }
+
+        /* Clickable severity cards for drill-down */
+        .breakdown-item.clickable {
+            cursor: pointer;
+        }
+
+        .breakdown-item.clickable:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .category-card.clickable {
+            cursor: pointer;
+        }
+
+        .category-card.clickable:hover {
+            border-color: var(--accent);
+        }
+
         /* Print Styles */
         @media print {
             body { background: #fff; color: #000; font-size: 12px; }
@@ -1176,8 +1485,37 @@ function Export-ADScoutHTMLReport {
             .filter-controls { display: none; }
             .finding-body { display: block !important; }
             .finding-card { break-inside: avoid; }
+            .charts-section { display: none; }
+        }
+        .chart-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
         }
     </style>
+$(if ($SelfContained) {
+    # Attempt to download and embed Chart.js for offline use
+    $chartJsContent = $null
+    try {
+        Write-Verbose "Downloading Chart.js for self-contained report..."
+        $chartJsContent = (Invoke-WebRequest -Uri 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js' -UseBasicParsing -TimeoutSec 30).Content
+    } catch {
+        Write-Warning "Could not download Chart.js for embedding: $_"
+        Write-Warning "Falling back to CDN. Report may require internet access for charts."
+    }
+    if ($chartJsContent) {
+        "    <script>$chartJsContent</script>"
+    } else {
+        '    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+    }
+} else {
+    '    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+})
 </head>
 <body>
     <div class="container">
@@ -1213,23 +1551,23 @@ function Export-ADScoutHTMLReport {
                     <div class="score-grade">Grade: $scoreGrade</div>
                 </div>
                 <div class="score-breakdown">
-                    <div class="breakdown-item critical">
+                    <div class="breakdown-item critical clickable" onclick="filterBySeverity('critical')" title="Click to view critical findings">
                         <span class="count">$($criticalFindings.Count)</span>
                         <span class="label">Critical</span>
                     </div>
-                    <div class="breakdown-item high">
+                    <div class="breakdown-item high clickable" onclick="filterBySeverity('high')" title="Click to view high findings">
                         <span class="count">$($highFindings.Count)</span>
                         <span class="label">High</span>
                     </div>
-                    <div class="breakdown-item medium">
+                    <div class="breakdown-item medium clickable" onclick="filterBySeverity('medium')" title="Click to view medium findings">
                         <span class="count">$($mediumFindings.Count)</span>
                         <span class="label">Medium</span>
                     </div>
-                    <div class="breakdown-item low">
+                    <div class="breakdown-item low clickable" onclick="filterBySeverity('low')" title="Click to view low findings">
                         <span class="count">$($lowFindings.Count)</span>
                         <span class="label">Low</span>
                     </div>
-                    <div class="breakdown-item info">
+                    <div class="breakdown-item info clickable" onclick="filterBySeverity('info')" title="Click to view info findings">
                         <span class="count">$($infoFindings.Count)</span>
                         <span class="label">Info</span>
                     </div>
@@ -1240,12 +1578,112 @@ function Export-ADScoutHTMLReport {
             </div>
         </section>
 
+        <section class="charts-section">
+            <h2>Interactive Analytics</h2>
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>Severity Distribution</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="severityChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>Category Scores</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+$(if ($BaselineComparison -or $TrendHistory) {
+@"
+            <div class="charts-grid">
+                <div class="chart-container" style="grid-column: span 2;">
+                    <h3>Score Trend Over Time</h3>
+                    <div class="chart-wrapper" style="height: 250px;">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+"@
+})
+        </section>
+
         <section class="category-scores">
             <h2>Category Breakdown</h2>
             <div class="category-grid">
                 $($categoryHtml -join "`n")
             </div>
         </section>
+
+$(if ($BaselineComparison) {
+    $blSummary = $BaselineComparison.Summary
+    $blResults = $BaselineComparison.Results | Where-Object { $_.Status -ne 'Unchanged' } | Select-Object -First 10
+    $trendClass = switch -Regex ($blSummary.OverallTrend) {
+        'Improving' { 'improving' }
+        'Worsening' { 'worsening' }
+        default { 'stable' }
+    }
+    $trendArrow = switch -Regex ($blSummary.OverallTrend) {
+        'Improving' { '&#8595;' }  # Down arrow (good - score decreasing)
+        'Worsening' { '&#8593;' }  # Up arrow (bad - score increasing)
+        default { '&#8594;' }      # Right arrow (stable)
+    }
+    $scoreDeltaClass = if ($blSummary.TotalScoreDelta -gt 0) { 'positive' } elseif ($blSummary.TotalScoreDelta -lt 0) { 'negative' } else { 'neutral' }
+    $scoreDeltaSign = if ($blSummary.TotalScoreDelta -gt 0) { '+' } else { '' }
+
+    $changesHtml = $blResults | ForEach-Object {
+        $statusLower = $_.Status.ToLower()
+        @"
+                    <div class="change-item $statusLower" onclick="scrollToFinding('$($_.RuleId)')">
+                        <div class="change-info">
+                            <span class="change-rule">$([System.Web.HttpUtility]::HtmlEncode($_.RuleId))</span>
+                            <span class="change-category">$([System.Web.HttpUtility]::HtmlEncode($_.Category)) | Score: $($_.BaselineScore) → $($_.CurrentScore)</span>
+                        </div>
+                        <span class="change-status $statusLower">$($_.Status)</span>
+                    </div>
+"@
+    }
+
+@"
+        <section class="baseline-section">
+            <h2>Baseline Comparison</h2>
+            <div class="baseline-summary">
+                <div class="baseline-stat">
+                    <span class="stat-value">$($blSummary.CurrentTotalScore)</span>
+                    <span class="stat-label">Current Score</span>
+                    <span class="stat-delta $scoreDeltaClass">$scoreDeltaSign$($blSummary.TotalScoreDelta) from baseline</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="stat-value">$($blSummary.BaselineTotalScore)</span>
+                    <span class="stat-label">Baseline Score</span>
+                    <span class="stat-delta neutral">$($blSummary.BaselineDate)</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="stat-value"><span class="trend-indicator $trendClass">$trendArrow $($blSummary.OverallTrend)</span></span>
+                    <span class="stat-label">Overall Trend</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="stat-value">$($blSummary.NewRules + $blSummary.DegradedRules)</span>
+                    <span class="stat-label">New Issues</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="stat-value">$($blSummary.ResolvedRules + $blSummary.ImprovedRules)</span>
+                    <span class="stat-label">Resolved</span>
+                </div>
+            </div>
+$(if ($blResults.Count -gt 0) {
+@"
+            <div class="baseline-changes">
+                <h3>Recent Changes</h3>
+                <div class="change-list">
+                    $($changesHtml -join "`n")
+                </div>
+            </div>
+"@
+})
+        </section>
+"@
+})
 
         <section class="findings-section">
             <h2>Detailed Findings</h2>
@@ -1256,6 +1694,13 @@ function Export-ADScoutHTMLReport {
                 <button class="filter-btn" data-severity="medium">Medium ($($mediumFindings.Count))</button>
                 <button class="filter-btn" data-severity="low">Low ($($lowFindings.Count))</button>
                 <button class="filter-btn" data-severity="info">Info ($($infoFindings.Count))</button>
+                <span class="filter-separator">|</span>
+                <select class="category-filter" onchange="filterByCategory(this.value)">
+                    <option value="">All Categories</option>
+$($categorySummary | ForEach-Object {
+    "                    <option value=`"$([System.Web.HttpUtility]::HtmlAttributeEncode($_.Name))`">$([System.Web.HttpUtility]::HtmlEncode($_.Name)) ($($_.FindingCount))</option>"
+} | Out-String)
+                </select>
             </div>
             <div class="findings-list">
                 $($findingsHtml -join "`n")
@@ -1302,7 +1747,328 @@ function Export-ADScoutHTMLReport {
     </div>
 
     <script>
-        // Filter functionality
+        // Chart color schemes
+        const chartColors = {
+            critical: '#dc3545',
+            high: '#e74c3c',
+            medium: '#fd7e14',
+            low: '#17a2b8',
+            info: '#3498db',
+            good: '#28a745',
+            warning: '#f39c12',
+            accent: '#58a6ff'
+        };
+
+        // Initialize charts when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if Chart.js loaded successfully
+            if (typeof Chart === 'undefined') {
+                document.querySelectorAll('.chart-wrapper').forEach(wrapper => {
+                    wrapper.innerHTML = '<div class="chart-fallback">Charts unavailable<br><small>(Chart.js library not loaded - check internet connection)</small></div>';
+                });
+                return;
+            }
+            initSeverityChart();
+            initCategoryChart();
+            initTrendChart();
+        });
+
+        // Severity Doughnut Chart
+        function initSeverityChart() {
+            const ctx = document.getElementById('severityChart');
+            if (!ctx) return;
+
+            const data = {
+                labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+                datasets: [{
+                    data: [$($criticalFindings.Count), $($highFindings.Count), $($mediumFindings.Count), $($lowFindings.Count), $($infoFindings.Count)],
+                    backgroundColor: [
+                        chartColors.critical,
+                        chartColors.high,
+                        chartColors.medium,
+                        chartColors.low,
+                        chartColors.info
+                    ],
+                    borderWidth: 0,
+                    hoverOffset: 10
+                }]
+            };
+
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
+                                padding: 15,
+                                usePointStyle: true,
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                                    return context.label + ': ' + context.parsed + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    },
+                    onClick: function(event, elements) {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const severities = ['critical', 'high', 'medium', 'low', 'info'];
+                            filterBySeverity(severities[index]);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Category Bar Chart
+        function initCategoryChart() {
+            const ctx = document.getElementById('categoryChart');
+            if (!ctx) return;
+
+            const categoryData = [
+$(($categorySummary | ForEach-Object {
+    "                { name: '$([System.Web.HttpUtility]::HtmlEncode($_.Name))', score: $($_.Score), max: $($_.MaxScore) }"
+}) -join ",`n")
+            ];
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: categoryData.map(c => c.name),
+                    datasets: [{
+                        label: 'Score',
+                        data: categoryData.map(c => c.score),
+                        backgroundColor: categoryData.map(c => {
+                            const pct = c.max > 0 ? (c.score / c.max) * 100 : 0;
+                            if (pct >= 50) return chartColors.critical;
+                            if (pct >= 25) return chartColors.warning;
+                            return chartColors.good;
+                        }),
+                        borderRadius: 4,
+                        barThickness: 20
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const cat = categoryData[context.dataIndex];
+                                    return 'Score: ' + cat.score + '/' + cat.max;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                            ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: {
+                                color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
+                                font: { size: 11 }
+                            }
+                        }
+                    },
+                    onClick: function(event, elements) {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            filterByCategory(categoryData[index].name);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Trend Line Chart (for baseline comparison)
+        function initTrendChart() {
+            const ctx = document.getElementById('trendChart');
+            if (!ctx) return;
+
+$(if ($TrendHistory) {
+    $trendLabels = ($TrendHistory | ForEach-Object { "'$($_.Date)'" }) -join ', '
+    $trendScores = ($TrendHistory | ForEach-Object { $_.Score }) -join ', '
+@"
+            const trendData = {
+                labels: [$trendLabels],
+                datasets: [{
+                    label: 'Security Score (lower is better)',
+                    data: [$trendScores],
+                    borderColor: chartColors.accent,
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: chartColors.accent
+                }]
+            };
+"@
+} elseif ($BaselineComparison) {
+    $baseDate = if ($BaselineComparison.Summary.BaselineDate) { $BaselineComparison.Summary.BaselineDate } else { 'Baseline' }
+    $baseScore = $BaselineComparison.Summary.BaselineTotalScore
+    $currScore = $BaselineComparison.Summary.CurrentTotalScore
+@"
+            const trendData = {
+                labels: ['$baseDate', 'Current'],
+                datasets: [{
+                    label: 'Total Score (lower is better)',
+                    data: [$baseScore, $currScore],
+                    borderColor: chartColors.accent,
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 8,
+                    pointHoverRadius: 10,
+                    pointBackgroundColor: chartColors.accent
+                }]
+            };
+"@
+} else {
+@"
+            return; // No trend data available
+"@
+})
+
+            new Chart(ctx, {
+                type: 'line',
+                data: trendData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim()
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Score: ' + context.parsed.y;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                            ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                            ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Drill-down: Filter by severity and scroll to findings
+        function filterBySeverity(severity) {
+            // Update filter buttons
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            const targetBtn = document.querySelector('.filter-btn[data-severity="' + severity + '"]');
+            if (targetBtn) targetBtn.classList.add('active');
+
+            // Reset category dropdown
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = '';
+
+            // Filter cards
+            document.querySelectorAll('.finding-card').forEach(card => {
+                if (severity === 'all' || card.dataset.severity === severity) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+
+            // Scroll to findings section
+            const findingsSection = document.querySelector('.findings-section');
+            if (findingsSection) {
+                findingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        // Drill-down: Filter by category and scroll to findings
+        function filterByCategory(category) {
+            // Reset severity filter to all
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            const allBtn = document.querySelector('.filter-btn[data-severity="all"]');
+            if (allBtn) allBtn.classList.add('active');
+
+            // Update category dropdown
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = category;
+
+            // Show cards matching category (or all if empty)
+            document.querySelectorAll('.finding-card').forEach(card => {
+                if (!category || category === '' || card.dataset.category === category) {
+                    card.style.display = 'block';
+                    if (category) card.classList.add('expanded'); // Auto-expand when filtering
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+
+            // Scroll to findings section (only if filtering, not when showing all)
+            if (category) {
+                const findingsSection = document.querySelector('.findings-section');
+                if (findingsSection) {
+                    findingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        }
+
+        // Scroll to specific finding by rule ID
+        function scrollToFinding(ruleId) {
+            // Reset all filters to show all
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            const allBtn = document.querySelector('.filter-btn[data-severity="all"]');
+            if (allBtn) allBtn.classList.add('active');
+            const categoryDropdown = document.querySelector('.category-filter');
+            if (categoryDropdown) categoryDropdown.value = '';
+            document.querySelectorAll('.finding-card').forEach(card => {
+                card.style.display = 'block';
+            });
+
+            // Find and scroll to the specific finding
+            const targetCard = document.querySelector('.finding-card .rule-id');
+            document.querySelectorAll('.finding-card').forEach(card => {
+                const ruleIdSpan = card.querySelector('.rule-id');
+                if (ruleIdSpan && ruleIdSpan.textContent.trim() === ruleId) {
+                    card.classList.add('expanded');
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Highlight briefly
+                    card.style.boxShadow = '0 0 0 3px var(--accent)';
+                    setTimeout(() => { card.style.boxShadow = ''; }, 2000);
+                }
+            });
+        }
+
+        // Filter functionality (existing)
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', function() {
                 const severity = this.dataset.severity;

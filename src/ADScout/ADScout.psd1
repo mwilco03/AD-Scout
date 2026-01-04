@@ -37,6 +37,10 @@
         'Import-ADScoutBaseline'
         'Compare-ADScoutBaseline'
 
+        # Scan history / trend tracking
+        'Save-ADScoutScanHistory'
+        'Get-ADScoutScanHistory'
+
         # CSV helpers
         'ConvertFrom-ADScoutCSV'
         'ConvertTo-ADScoutCSV'
