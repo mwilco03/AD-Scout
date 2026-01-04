@@ -19,10 +19,10 @@
     Version     = '1.0.0'
     Category    = 'Authentication'
     Title       = 'LSA Protection (RunAsPPL) Not Enabled'
-    Description = 'Identifies Domain Controllers and servers without LSA Protection enabled, leaving LSASS vulnerable to credential extraction attacks.'
+    Description = 'Identifies Domain Controllers without LSA Protection enabled. Checks both GPO enforcement AND individual DC registry to ensure protection is applied consistently.'
     Severity    = 'High'
     Weight      = 50
-    DataSource  = 'DomainControllers'
+    DataSource  = 'DomainControllers,GPOs'
 
     References  = @(
         @{ Title = 'LSA Protection'; Url = 'https://learn.microsoft.com/en-us/windows-server/security/credentials-protection-and-management/configuring-additional-lsa-protection' }
@@ -48,65 +48,110 @@
         param($Data, $Domain)
 
         $findings = @()
+        $dcs = if ($Data.DomainControllers) { $Data.DomainControllers } else { $Data }
 
-        if ($Data.DomainControllers) {
-            foreach ($dc in $Data.DomainControllers) {
-                $dcName = $dc.Name
-                if (-not $dcName) { $dcName = $dc.DnsHostName }
-                if (-not $dcName) { continue }
+        # ========================================================================
+        # BELT: Check GPO enforcement for LSA Protection
+        # ========================================================================
+        $gpoEnforcesLSAProtection = $false
 
-                $lsaProtectionStatus = 'Unknown'
-                $runAsPPL = $null
-
+        if ($Data.GPOs) {
+            foreach ($gpo in $Data.GPOs) {
                 try {
-                    $regResult = Invoke-Command -ComputerName $dcName -ScriptBlock {
-                        # Check RunAsPPL registry value
-                        $lsaPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
-                        $runAsPPL = Get-ItemProperty -Path $lsaPath -Name 'RunAsPPL' -ErrorAction SilentlyContinue
-
-                        # Check if LSASS is actually running as PPL
-                        $lsassProcess = Get-Process -Name lsass -ErrorAction SilentlyContinue
-                        $isPPL = $false
-                        if ($lsassProcess) {
-                            try {
-                                # Check process protection level
-                                $isPPL = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -ErrorAction SilentlyContinue).RunAsPPL -eq 1
-                            } catch {}
+                    # Check for LSA Protection GPO setting
+                    # Administrative Templates > System > Local Security Authority
+                    # "Configure LSASS to run as a protected process"
+                    $admxPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Registry.pol"
+                    if (Test-Path $admxPath -ErrorAction SilentlyContinue) {
+                        $bytes = [System.IO.File]::ReadAllBytes($admxPath)
+                        $content = [System.Text.Encoding]::Unicode.GetString($bytes)
+                        # RunAsPPL or LsaCfgFlags indicates LSA protection config
+                        if ($content -match 'RunAsPPL' -or $content -match 'LsaCfgFlags') {
+                            $gpoEnforcesLSAProtection = $true
+                            break
                         }
+                    }
 
-                        @{
-                            RunAsPPL = $runAsPPL.RunAsPPL
-                            LsassRunning = ($null -ne $lsassProcess)
-                        }
-                    } -ErrorAction Stop
-
-                    if ($regResult) {
-                        $runAsPPL = $regResult.RunAsPPL
-
-                        if ($runAsPPL -eq 1) {
-                            $lsaProtectionStatus = 'Enabled'
-                        } elseif ($runAsPPL -eq 0) {
-                            $lsaProtectionStatus = 'Disabled'
-                        } else {
-                            $lsaProtectionStatus = 'Not configured (disabled by default)'
+                    # Also check Group Policy Preferences
+                    $prefPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Preferences\Registry\Registry.xml"
+                    if (Test-Path $prefPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $prefPath -Raw -ErrorAction SilentlyContinue
+                        if ($content -match 'RunAsPPL') {
+                            $gpoEnforcesLSAProtection = $true
+                            break
                         }
                     }
                 } catch {
-                    $lsaProtectionStatus = 'Unable to check'
+                    Write-Verbose "AUTH-LSAProtectionDisabled: Could not check GPO $($gpo.DisplayName): $_"
                 }
+            }
+        }
 
-                # Report if not enabled
-                if ($lsaProtectionStatus -ne 'Enabled') {
-                    $findings += [PSCustomObject]@{
-                        Computer            = $dcName
-                        LSAProtection       = $lsaProtectionStatus
-                        RunAsPPL            = if ($null -eq $runAsPPL) { 'Not Set' } else { $runAsPPL }
-                        RiskLevel           = if ($lsaProtectionStatus -eq 'Disabled') { 'High' } else { 'Medium' }
-                        OperatingSystem     = $dc.OperatingSystem
-                        Impact              = 'LSASS memory can be dumped for credential extraction'
-                        Recommendation      = 'Enable RunAsPPL or deploy Credential Guard'
-                        DistinguishedName   = $dc.DistinguishedName
+        if (-not $gpoEnforcesLSAProtection) {
+            $findings += [PSCustomObject]@{
+                ObjectType          = 'GPO Policy'
+                Computer            = 'Domain-wide'
+                LSAProtection       = 'No GPO enforces LSA Protection'
+                RunAsPPL            = 'Not Enforced'
+                RiskLevel           = 'High'
+                OperatingSystem     = 'N/A'
+                Impact              = 'DC configurations may drift - no policy enforcement'
+                Recommendation      = 'Deploy LSA Protection via GPO'
+                DistinguishedName   = 'N/A'
+                ConfigSource        = 'Missing GPO'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check each DC's actual LSA Protection configuration
+        # ========================================================================
+        foreach ($dc in $dcs) {
+            $dcName = $dc.Name
+            if (-not $dcName) { $dcName = $dc.DnsHostName }
+            if (-not $dcName) { continue }
+
+            $lsaProtectionStatus = 'Unknown'
+            $runAsPPL = $null
+
+            try {
+                $regResult = Invoke-Command -ComputerName $dcName -ScriptBlock {
+                    # Check RunAsPPL registry value
+                    $lsaPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+                    $runAsPPL = Get-ItemProperty -Path $lsaPath -Name 'RunAsPPL' -ErrorAction SilentlyContinue
+
+                    @{
+                        RunAsPPL = $runAsPPL.RunAsPPL
                     }
+                } -ErrorAction Stop
+
+                if ($regResult) {
+                    $runAsPPL = $regResult.RunAsPPL
+
+                    if ($runAsPPL -eq 1) {
+                        $lsaProtectionStatus = 'Enabled'
+                    } elseif ($runAsPPL -eq 0) {
+                        $lsaProtectionStatus = 'Disabled'
+                    } else {
+                        $lsaProtectionStatus = 'Not configured (disabled by default)'
+                    }
+                }
+            } catch {
+                $lsaProtectionStatus = 'Unable to check'
+            }
+
+            # Report if not enabled
+            if ($lsaProtectionStatus -ne 'Enabled') {
+                $findings += [PSCustomObject]@{
+                    ObjectType          = 'DC Configuration'
+                    Computer            = $dcName
+                    LSAProtection       = $lsaProtectionStatus
+                    RunAsPPL            = if ($null -eq $runAsPPL) { 'Not Set' } else { $runAsPPL }
+                    RiskLevel           = if ($lsaProtectionStatus -eq 'Disabled') { 'High' } else { 'Medium' }
+                    OperatingSystem     = $dc.OperatingSystem
+                    Impact              = 'LSASS memory can be dumped for credential extraction'
+                    Recommendation      = 'Enable RunAsPPL or deploy Credential Guard'
+                    DistinguishedName   = $dc.DistinguishedName
+                    ConfigSource        = 'Registry'
                 }
             }
         }
