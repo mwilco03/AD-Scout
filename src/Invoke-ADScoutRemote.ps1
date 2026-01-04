@@ -178,28 +178,111 @@ try {
         Write-Verbose "Loaded bundled module from $bundleUrl"
     }
     catch {
-        Write-Verbose "Bundle not found, falling back to module loader..."
+        Write-Verbose "Bundle not found at $bundleUrl, attempting individual component loading..."
+        Write-Host "Bundle not available. Loading module components individually..." -ForegroundColor Yellow
 
-        # Fall back to loading individual module components
-        $moduleLoaderUrl = "$BaseUrl/src/ADScout/ADScout.psm1"
-        $bundleContent = $null
+        # Load core components in order
+        $components = @(
+            # Private - Helpers first
+            'src/ADScout/Private/Helpers/Write-ADScoutLog.ps1'
+            'src/ADScout/Private/Helpers/Get-ADScoutCache.ps1'
+            'src/ADScout/Private/Helpers/Convert-SidToName.ps1'
+            'src/ADScout/Private/Helpers/Get-ADScoutRulePaths.ps1'
+            'src/ADScout/Private/Helpers/Test-ADScoutADConnectivity.ps1'
 
-        # We'll need to construct the module in memory
-        Write-Warning "Bundle not available. For best results, run: ./build/Build-Bundle.ps1"
-        Write-Host "Attempting to load module components individually..." -ForegroundColor Yellow
+            # Private - Compatibility
+            'src/ADScout/Private/Compatibility/Test-PSVersion.ps1'
+            'src/ADScout/Private/Compatibility/Invoke-ADScoutParallel.ps1'
+            'src/ADScout/Private/Compatibility/Get-CimOrWmi.ps1'
 
-        # This fallback loads the full module structure
-        $manifestUrl = "$BaseUrl/src/ADScout/ADScout.psd1"
-        $loaderUrl = "$BaseUrl/src/ADScout/ADScout.psm1"
+            # Private - Statistics
+            'src/ADScout/Private/Statistics/Get-ADScoutStatistics.ps1'
+            'src/ADScout/Private/Statistics/Get-ADScoutZScore.ps1'
+            'src/ADScout/Private/Statistics/Get-ADScoutIQROutliers.ps1'
+            'src/ADScout/Private/Statistics/Get-ADScoutPeerBaseline.ps1'
 
-        throw "Individual component loading not yet implemented. Please use the bundled version."
+            # Private - Collectors
+            'src/ADScout/Private/Collectors/Get-ADScoutUserData.ps1'
+            'src/ADScout/Private/Collectors/Get-ADScoutComputerData.ps1'
+            'src/ADScout/Private/Collectors/Get-ADScoutGroupData.ps1'
+            'src/ADScout/Private/Collectors/Get-ADScoutTrustData.ps1'
+            'src/ADScout/Private/Collectors/Get-ADScoutGPOData.ps1'
+            'src/ADScout/Private/Collectors/Get-ADScoutCertificateData.ps1'
+
+            # Private - Scanners
+            'src/ADScout/Private/Scanners/Invoke-RuleEvaluation.ps1'
+
+            # Public functions
+            'src/ADScout/Public/Get-ADScoutConfig.ps1'
+            'src/ADScout/Public/Set-ADScoutConfig.ps1'
+            'src/ADScout/Public/Get-ADScoutRule.ps1'
+            'src/ADScout/Public/Invoke-ADScoutScan.ps1'
+            'src/ADScout/Public/Export-ADScoutReport.ps1'
+            'src/ADScout/Public/Get-ADScoutRemediation.ps1'
+            'src/ADScout/Public/Connect-ADScoutGraph.ps1'
+
+            # Reporters
+            'src/ADScout/Reporters/ConsoleReporter.ps1'
+            'src/ADScout/Reporters/JSONReporter.ps1'
+        )
+
+        # Initialize module-level variables
+        $script:ADScoutConfig = @{
+            ParallelThrottleLimit = [Environment]::ProcessorCount
+            DefaultReporter       = 'Console'
+            RulePaths             = @()
+            CacheTTL              = 300
+            LogLevel              = 'Warning'
+        }
+
+        $script:ADScoutCache = @{
+            Data       = @{}
+            Timestamps = @{}
+        }
+
+        $loadedComponents = 0
+        $totalComponents = $components.Count
+
+        foreach ($component in $components) {
+            try {
+                $componentUrl = "$BaseUrl/$component"
+                Write-Verbose "Loading: $component"
+                $componentContent = Get-RemoteScript -Url $componentUrl
+
+                # Execute the component
+                $componentBlock = [scriptblock]::Create($componentContent)
+                . $componentBlock
+
+                $loadedComponents++
+                $percent = [math]::Round(($loadedComponents / $totalComponents) * 30)
+                Write-ProgressStatus -Activity "AD-Scout Remote Execution" -Status "Loading: $($component.Split('/')[-1])" -PercentComplete $percent
+            }
+            catch {
+                Write-Warning "Failed to load component $component`: $_"
+            }
+        }
+
+        if ($loadedComponents -lt 10) {
+            throw "Failed to load minimum required components ($loadedComponents of $totalComponents). Check network connectivity to $BaseUrl"
+        }
+
+        Write-Host "Loaded $loadedComponents of $totalComponents components" -ForegroundColor Green
+
+        # Note: Rules are loaded dynamically by Get-ADScoutRule from the BaseUrl
+        # Set the rule base URL for remote loading
+        $script:ADScoutRemoteRuleBase = "$BaseUrl/src/ADScout/Rules"
+
+        $bundleContent = $null  # Mark that we used individual loading
     }
 
     Write-ProgressStatus -Activity "AD-Scout Remote Execution" -Status "Loading module into memory..." -PercentComplete 30
 
-    # Execute the bundle in a new scope to load all functions
-    $moduleScope = [scriptblock]::Create($bundleContent)
-    . $moduleScope
+    # Execute the bundle in a new scope to load all functions (if bundle was loaded)
+    if ($bundleContent) {
+        $moduleScope = [scriptblock]::Create($bundleContent)
+        . $moduleScope
+    }
+    # If bundleContent is null, we already loaded individual components above
 
     Write-ProgressStatus -Activity "AD-Scout Remote Execution" -Status "Module loaded successfully" -PercentComplete 50
 }
