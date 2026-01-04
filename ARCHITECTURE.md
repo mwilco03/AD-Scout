@@ -665,6 +665,123 @@ This enables scenarios like:
 - Multiple team members viewing same engagement data
 - Background scheduled scans updating dashboard automatically
 
+## Incremental and Differential Scanning
+
+### Overview
+
+AD-Scout supports **incremental scanning** to significantly reduce scan time by only evaluating objects that have changed since the last scan. This is critical for large environments where full scans may take considerable time.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   Incremental Scan Flow                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Load Previous Watermark                                     │
+│         │   { HighestUSN: 12345678, ScanTime: ... }             │
+│         │                                                        │
+│         ▼                                                        │
+│   2. Query Changed Objects Since Watermark                       │
+│         │   LDAP Filter: (uSNChanged>=12345678)                 │
+│         │   Fallback: (whenChanged>=20240104...)                │
+│         │                                                        │
+│         ▼                                                        │
+│   3. Execute Rules on Changed Objects                            │
+│         │                                                        │
+│         ▼                                                        │
+│   4. Merge with Baseline Results                                 │
+│         │   - Keep unchanged findings from baseline              │
+│         │   - Update findings for changed objects                │
+│         │   - Add new findings                                   │
+│         │                                                        │
+│         ▼                                                        │
+│   5. Save New Watermark for Next Scan                            │
+│         │   { HighestUSN: 12345999, ScanTime: now }             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### USN (Update Sequence Number)
+
+AD-Scout uses the **USN** attribute as the primary change detection mechanism:
+
+- Each AD object has a `uSNChanged` attribute updated on every modification
+- The domain controller tracks `highestCommittedUSN` in RootDSE
+- Querying `(uSNChanged>={watermark})` returns only modified objects
+
+If USN is unavailable, falls back to `whenChanged` timestamp filtering.
+
+### Usage
+
+```powershell
+# Full scan (establishes baseline)
+Invoke-ADScoutScan | Export-ADScoutReport -Format HTML -Path baseline.html
+
+# Incremental scan (only changed objects)
+Invoke-ADScoutScan -Incremental
+
+# Incremental within engagement context
+Invoke-ADScoutScan -Incremental -EngagementId 'Q1-2024-Audit'
+
+# Force incremental from specific baseline
+Invoke-ADScoutScan -Incremental -BaselinePath ~/.adscout/sessions/20240101-090000
+```
+
+### Watermark Storage
+
+```
+~/.adscout/sessions/{session-id}/
+├── results.json       # Scan results
+├── state.json         # Status information
+├── progress.json      # Resume checkpoint
+└── watermark.json     # Incremental scan watermark
+    │
+    └── {
+          "Domain": "contoso.com",
+          "ScanTime": "2024-01-04T14:30:22Z",
+          "HighestUSN": 12345678,
+          "ObjectCount": 50000,
+          "ScanType": "Full"
+        }
+```
+
+### Incremental Scan Output
+
+When running an incremental scan, AD-Scout provides a summary showing:
+
+```
+Incremental Scan Summary:
+  Baseline: 2024-01-03T10:00:00Z
+  Score Change: 85 -> 78 (-7)
+  New Findings: 2
+  Resolved: 5
+  Changed: 3
+```
+
+### Helper Functions
+
+| Function | Purpose |
+|----------|---------|
+| `Get-ADScoutScanWatermark` | Retrieve previous scan watermark |
+| `Save-ADScoutScanWatermark` | Store watermark after scan |
+| `Get-ADScoutHighestUSN` | Query current DC's highest USN |
+| `Get-ADScoutChangedObjects` | Fetch objects changed since watermark |
+| `Merge-ADScoutIncrementalResults` | Combine incremental with baseline |
+| `Test-ADScoutIncrementalAvailable` | Check if incremental is possible |
+| `Get-ADScoutIncrementalSummary` | Generate change summary |
+
+### When to Use Full vs Incremental
+
+| Scenario | Recommended |
+|----------|-------------|
+| First scan of a domain | Full |
+| Daily monitoring | Incremental |
+| After major AD changes | Full |
+| Post-remediation verification | Incremental |
+| Watermark older than 7 days | Full (auto-fallback) |
+| Different domain controller | Full |
+
 ## SIEM Integrations
 
 ### Reporters
