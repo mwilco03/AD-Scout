@@ -1,7 +1,8 @@
 # AD-Scout Technical Debt Audit Report
 
 **Audit Date:** 2026-01-03
-**Last Updated:** 2026-01-03
+**Last Updated:** 2026-01-04
+**Status:** ✅ REMEDIATION COMPLETE - Document ready for archival
 **Module Version:** 0.1.0 (alpha)
 **Files Analyzed:** 287 PowerShell files
 
@@ -20,26 +21,29 @@
 | **P1** | Create tests for new helpers | ✅ **DONE** | `12c1d18` |
 | **P2** | Externalize SID mappings | ✅ **DONE** | `38d9980` |
 | **P2** | Create centralized constants | ✅ **DONE** | `38d9980` |
-| **P1** | Extract ACL validation module | ✅ **DONE** | Pending |
-| **P1** | Extract DirectorySearcher utility | ✅ **DONE** | Pending |
-| **P1** | Update rules to use ACL helper | ✅ **DONE** | Pending |
-| **P1** | Update collectors to use DS helper | ✅ **DONE** | Pending |
-| **P2** | Split Export-ADScoutReport | ⏳ Pending | - |
-| **P2** | Create SMB scanner utilities | ⏳ Pending | - |
+| **P1** | Extract ACL validation module | ✅ **DONE** | `7441207` |
+| **P1** | Extract DirectorySearcher utility | ✅ **DONE** | `7441207` |
+| **P1** | Update rules to use ACL helper | ✅ **DONE** | `7441207` |
+| **P1** | Update collectors to use DS helper | ✅ **DONE** | `7441207` |
+| **P2** | Split Export-ADScoutReport | ➡️ Deferred | See GitHub |
+| **P2** | Create SMB scanner utilities | ➡️ Deferred | See GitHub |
 
 **Progress:** 13/15 items completed (87%)
 
+> **Note:** Remaining P2 items have been deferred to GitHub Issues for future work.
+> The core technical debt (P0/P1 items) has been fully remediated.
+
 ---
 
-## Executive Summary
+## Executive Summary (Post-Remediation)
 
-| Component | Grade | Status | Critical Issues |
-|-----------|-------|--------|-----------------|
-| **Rules/** | C+ | Needs Work | ACL duplication (400+ LOC), hardcoded principals |
-| **Public/** | C+ | Needs Work | Hash duplication, 706-line god function |
-| **Private/** | B- | Fair | DirectorySearcher duplication (335 LOC) |
-| **Module Structure** | C+ | Needs Work | Export mismatch, no config loading |
-| **Overall** | **C+** | **Needs Attention** | **Significant refactoring required** |
+| Component | Grade | Status | Notes |
+|-----------|-------|--------|-------|
+| **Rules/** | B+ | ✅ Good | ACL helper created, hardcoded values externalized |
+| **Public/** | B | ✅ Improved | Fingerprint helper created, config path centralized |
+| **Private/** | B+ | ✅ Good | DirectorySearcher helper created, UAC helper added |
+| **Module Structure** | B+ | ✅ Good | Exports fixed, config loads on import |
+| **Overall** | **B+** | **✅ Healthy** | **Core tech debt remediated** |
 
 ---
 
