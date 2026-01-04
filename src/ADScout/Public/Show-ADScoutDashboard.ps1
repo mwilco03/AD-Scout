@@ -164,6 +164,14 @@ function Start-ADScoutWebDashboard {
     <#
     .SYNOPSIS
         Internal function to start the web dashboard HTTP server.
+
+    .DESCRIPTION
+        Starts an HTTP server with disk-backed session persistence.
+        Results are stored to disk first, then served from memory cache.
+        This enables:
+        - Resume from interrupted scans
+        - Persistence across process restarts
+        - Multiple dashboard instances sharing data
     #>
     [CmdletBinding()]
     param(
@@ -173,10 +181,28 @@ function Start-ADScoutWebDashboard {
         [string]$EngagementId
     )
 
-    # Store results in script scope for API access
-    $script:DashboardResults = $Results
+    # Initialize session with disk persistence
+    $script:DashboardSession = Get-ADScoutSessionPath -EngagementId $EngagementId
     $script:DashboardEngagement = $EngagementId
     $script:DashboardStartTime = Get-Date
+
+    # Check for existing session to resume
+    if (-not $Results) {
+        $latestSession = Get-ADScoutLatestSession -EngagementId $EngagementId
+        if ($latestSession -and (Test-Path (Join-Path $latestSession.Path 'results.json'))) {
+            Write-Host "Resuming from session: $($latestSession.SessionId)" -ForegroundColor Yellow
+            $script:DashboardSession = Get-ADScoutSessionPath -SessionId $latestSession.SessionId -EngagementId $EngagementId
+            $sessionState = Get-ADScoutSessionState -SessionPath $latestSession.Path
+            $Results = $sessionState.Results
+        }
+    }
+
+    # Store results - disk first, then memory
+    if ($Results) {
+        Save-ADScoutSessionState -SessionPath $script:DashboardSession.Path -Results $Results -Status 'Ready'
+    }
+    $script:DashboardResults = $Results
+    $script:DashboardResultsTimestamp = Get-Date
 
     $prefix = "http://localhost:$Port/"
 
@@ -189,6 +215,8 @@ function Start-ADScoutWebDashboard {
         Write-Host "======================" -ForegroundColor Cyan
         Write-Host "Dashboard URL: " -NoNewline
         Write-Host $prefix -ForegroundColor Green
+        Write-Host "Session: $($script:DashboardSession.SessionId)" -ForegroundColor Gray
+        Write-Host "Data persisted to: $($script:DashboardSession.Path)" -ForegroundColor Gray
         Write-Host "Press Ctrl+C to stop the server.`n" -ForegroundColor Yellow
 
         # Open browser unless suppressed
@@ -216,6 +244,9 @@ function Start-ADScoutWebDashboard {
                 $path = $request.Url.LocalPath
                 Write-Verbose "Request: $($request.HttpMethod) $path"
 
+                # Check if disk data is newer than memory (another process may have updated)
+                Sync-ADScoutDashboardFromDisk
+
                 # Route the request
                 switch -Regex ($path) {
                     '^/$' {
@@ -234,8 +265,11 @@ function Start-ADScoutWebDashboard {
                     '^/api/scan$' {
                         if ($request.HttpMethod -eq 'POST') {
                             Write-Host "Running new scan..." -ForegroundColor Yellow
+                            # Run scan and persist to disk first
                             $script:DashboardResults = Invoke-ADScoutScan
-                            $content = @{ status = 'completed'; resultCount = $script:DashboardResults.Count } | ConvertTo-Json
+                            Save-ADScoutSessionState -SessionPath $script:DashboardSession.Path -Results $script:DashboardResults -Status 'Completed'
+                            $script:DashboardResultsTimestamp = Get-Date
+                            $content = @{ status = 'completed'; resultCount = $script:DashboardResults.Count; sessionId = $script:DashboardSession.SessionId } | ConvertTo-Json
                             Send-ADScoutResponse -Response $response -Content $content -ContentType 'application/json'
                         } else {
                             Send-ADScoutResponse -Response $response -Content '{"error":"Use POST to trigger scan"}' -ContentType 'application/json' -StatusCode 405
@@ -253,12 +287,25 @@ function Start-ADScoutWebDashboard {
                         $content = $categories | ConvertTo-Json -Depth 3 -Compress
                         Send-ADScoutResponse -Response $response -Content $content -ContentType 'application/json'
                     }
+                    '^/api/session$' {
+                        $sessionInfo = @{
+                            sessionId = $script:DashboardSession.SessionId
+                            path = $script:DashboardSession.Path
+                            engagement = $script:DashboardEngagement
+                            resultCount = if ($script:DashboardResults) { $script:DashboardResults.Count } else { 0 }
+                            lastUpdated = $script:DashboardResultsTimestamp.ToString('o')
+                        }
+                        $content = $sessionInfo | ConvertTo-Json -Compress
+                        Send-ADScoutResponse -Response $response -Content $content -ContentType 'application/json'
+                    }
                     '^/api/health$' {
                         $health = @{
                             status = 'healthy'
                             uptime = ((Get-Date) - $script:DashboardStartTime).TotalSeconds
                             engagement = $script:DashboardEngagement
+                            sessionId = $script:DashboardSession.SessionId
                             resultCount = if ($script:DashboardResults) { $script:DashboardResults.Count } else { 0 }
+                            persistedToDisk = (Test-Path $script:DashboardSession.ResultsFile)
                         }
                         $content = $health | ConvertTo-Json -Compress
                         Send-ADScoutResponse -Response $response -Content $content -ContentType 'application/json'
@@ -292,6 +339,30 @@ function Start-ADScoutWebDashboard {
             $listener.Stop()
             $listener.Close()
             Write-Host "`nWeb dashboard stopped." -ForegroundColor Yellow
+            Write-Host "Session data saved to: $($script:DashboardSession.Path)" -ForegroundColor Gray
+        }
+    }
+}
+
+function Sync-ADScoutDashboardFromDisk {
+    <#
+    .SYNOPSIS
+        Syncs dashboard memory cache from disk if disk is newer.
+    #>
+    if (-not $script:DashboardSession) { return }
+
+    $resultsFile = $script:DashboardSession.ResultsFile
+    if (-not (Test-Path $resultsFile)) { return }
+
+    $diskTime = (Get-Item $resultsFile).LastWriteTime
+    if ($diskTime -gt $script:DashboardResultsTimestamp) {
+        Write-Verbose "Disk data is newer, reloading from: $resultsFile"
+        try {
+            $script:DashboardResults = Get-Content -Path $resultsFile -Raw | ConvertFrom-Json
+            $script:DashboardResultsTimestamp = $diskTime
+        }
+        catch {
+            Write-Warning "Failed to reload from disk: $_"
         }
     }
 }
