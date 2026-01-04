@@ -319,61 +319,15 @@ function Invoke-ADScoutScan {
                                -Status "Running: $($rule.Name) ($ruleCount/$totalRules)" `
                                -PercentComplete $percentComplete
 
-                Write-Verbose "Executing rule: $($rule.Id) - $($rule.Name)"
+                # Use Invoke-RuleEvaluation for consistent rule execution
+                $finding = Invoke-RuleEvaluation -Rule $rule -ADData $adData -Domain $Domain
 
-                try {
-                    # Check prerequisites
-                    if ($rule.Prerequisites) {
-                        $prereqResult = & $rule.Prerequisites -ADData $adData
-                        if (-not $prereqResult) {
-                            Write-Verbose "Skipping rule $($rule.Id): Prerequisites not met"
-                            continue
-                        }
-                    }
-
-                    # Execute the rule
-                    $findings = & $rule.ScriptBlock -ADData $adData
-
-                    if ($findings) {
-                        $findingCount = @($findings).Count
-
-                        # Calculate score based on computation type
-                        $score = switch ($rule.Computation) {
-                            'TriggerOnPresence' { $rule.Points }
-                            'PerDiscover' { [math]::Min($findingCount * $rule.Points, $rule.MaxPoints) }
-                            'TriggerOnThreshold' { if ($findingCount -ge $rule.Threshold) { $rule.Points } else { 0 } }
-                            'TriggerIfLessThan' { if ($findingCount -lt $rule.Threshold) { $rule.Points } else { 0 } }
-                            default { $findingCount * $rule.Points }
-                        }
-
-                        $result = [PSCustomObject]@{
-                            PSTypeName   = 'ADScoutResult'
-                            RuleId       = $rule.Id
-                            RuleName     = $rule.Name
-                            Category     = $rule.Category
-                            Description  = $rule.Description
-                            FindingCount = $findingCount
-                            Score        = $score
-                            MaxScore     = $rule.MaxPoints
-                            Findings     = $findings
-                            MITRE        = $rule.MITRE
-                            CIS          = $rule.CIS
-                            STIG         = $rule.STIG
-                            Remediation  = $rule.Remediation
-                            TechnicalExplanation = $rule.TechnicalExplanation
-                            References   = $rule.References
-                            ExecutedAt   = Get-Date
-                        }
-
-                        $results.Add($result)
-                        Write-Verbose "Rule $($rule.Id) found $findingCount issues (Score: $score)"
-                    }
-                    else {
-                        Write-Verbose "Rule $($rule.Id) passed with no findings"
-                    }
+                if ($null -ne $finding) {
+                    $results.Add($finding)
+                    Write-Verbose "Rule $($rule.Id) found $($finding.FindingCount) issues (Score: $($finding.Score))"
                 }
-                catch {
-                    Write-Warning "Error executing rule $($rule.Id): $_"
+                else {
+                    Write-Verbose "Rule $($rule.Id) passed with no findings"
                 }
             }
 

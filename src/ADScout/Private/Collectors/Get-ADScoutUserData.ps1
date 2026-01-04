@@ -94,8 +94,10 @@ function Get-ADScoutUserData {
 
     $users = @()
 
-    # Try AD module first
-    if (Get-Module -ListAvailable ActiveDirectory -ErrorAction SilentlyContinue) {
+    # Use centralized method detection (cached)
+    $collectorMethod = Get-ADScoutCollectorMethod
+
+    if ($collectorMethod -eq 'ADModule') {
         try {
             Write-Verbose "Using ActiveDirectory module"
 
@@ -108,7 +110,6 @@ function Get-ADScoutUserData {
             if ($Credential) { $params.Credential = $Credential }
             if ($SearchBase) { $params.SearchBase = $SearchBase }
 
-            Import-Module ActiveDirectory -ErrorAction Stop
             $users = Get-ADUser @params
         }
         catch {
@@ -117,7 +118,7 @@ function Get-ADScoutUserData {
         }
     }
     else {
-        Write-Verbose "AD module not available, using DirectorySearcher"
+        Write-Verbose "Using DirectorySearcher method"
         $users = Get-ADScoutUserDataFallback @PSBoundParameters
     }
 

@@ -45,6 +45,21 @@ function Invoke-RuleEvaluation {
                 return $null
             }
 
+            # Check prerequisites if defined
+            if ($Rule.Prerequisites) {
+                try {
+                    $prereqResult = & $Rule.Prerequisites -ADData $ADData
+                    if (-not $prereqResult) {
+                        Write-ADScoutLog -Message "Prerequisites not met for rule $($Rule.Id), skipping" -Level Verbose
+                        return $null
+                    }
+                }
+                catch {
+                    Write-ADScoutLog -Message "Prerequisite check failed for rule $($Rule.Id): $_" -Level Verbose
+                    return $null
+                }
+            }
+
             # Execute the detection scriptblock (rules expect -ADData parameter)
             $detectResult = & $Rule.ScriptBlock -ADData $ADData
 

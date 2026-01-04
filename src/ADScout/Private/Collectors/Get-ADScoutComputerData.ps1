@@ -60,9 +60,12 @@ function Get-ADScoutComputerData {
 
     $computers = @()
 
-    if (Get-Module -ListAvailable ActiveDirectory -ErrorAction SilentlyContinue) {
+    # Use centralized method detection (cached)
+    $collectorMethod = Get-ADScoutCollectorMethod
+
+    if ($collectorMethod -eq 'ADModule') {
         try {
-            Import-Module ActiveDirectory -ErrorAction Stop
+            Write-Verbose "Using ActiveDirectory module"
 
             $params = @{
                 Filter     = '*'
@@ -80,7 +83,7 @@ function Get-ADScoutComputerData {
         }
     }
     else {
-        Write-Verbose "AD module not available, using DirectorySearcher"
+        Write-Verbose "Using DirectorySearcher method"
         $computers = Get-ADScoutComputerDataFallback -Domain $Domain -Server $Server -Credential $Credential
     }
 
