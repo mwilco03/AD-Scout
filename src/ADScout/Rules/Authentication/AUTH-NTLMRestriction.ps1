@@ -19,10 +19,10 @@
     Version     = '1.0.0'
     Category    = 'Authentication'
     Title       = 'NTLM Not Restricted'
-    Description = 'Identifies environments that have not implemented NTLM restrictions, leaving them vulnerable to relay attacks, pass-the-hash, and credential theft.'
+    Description = 'Identifies environments that have not implemented NTLM restrictions. Checks both GPO enforcement AND DC registry settings to ensure NTLM hardening is applied consistently.'
     Severity    = 'High'
     Weight      = 55
-    DataSource  = 'DomainControllers'
+    DataSource  = 'DomainControllers,GPOs'
 
     References  = @(
         @{ Title = 'NTLM Auditing and Restricting'; Url = 'https://docs.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/network-security-restrict-ntlm-ntlm-authentication-in-this-domain' }
@@ -48,7 +48,101 @@
 
         $findings = @()
 
-        # Check NTLM policies on Domain Controllers
+        # ========================================================================
+        # BELT: Check GPO enforcement for NTLM settings
+        # ========================================================================
+        $gpoEnforcesNTLM = @{
+            LmCompatibilityLevel = $false
+            RestrictNTLM = $false
+            AuditNTLM = $false
+        }
+
+        if ($Data.GPOs) {
+            foreach ($gpo in $Data.GPOs) {
+                try {
+                    # Check GptTmpl.inf for LmCompatibilityLevel
+                    $gptTmplPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf"
+                    if (Test-Path $gptTmplPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $gptTmplPath -Raw -ErrorAction SilentlyContinue
+                        # LmCompatibilityLevel = 5 is the secure setting
+                        if ($content -match 'LmCompatibilityLevel\s*=\s*([0-9]+)') {
+                            $level = [int]$Matches[1]
+                            if ($level -ge 5) {
+                                $gpoEnforcesNTLM.LmCompatibilityLevel = $true
+                            }
+                        }
+                    }
+
+                    # Check Registry.pol for NTLM restriction settings
+                    $regPolPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Registry.pol"
+                    if (Test-Path $regPolPath -ErrorAction SilentlyContinue) {
+                        $bytes = [System.IO.File]::ReadAllBytes($regPolPath)
+                        $content = [System.Text.Encoding]::Unicode.GetString($bytes)
+
+                        # Check for RestrictReceivingNTLMTraffic or RestrictSendingNTLMTraffic
+                        if ($content -match 'RestrictReceivingNTLMTraffic' -or $content -match 'RestrictSendingNTLMTraffic') {
+                            $gpoEnforcesNTLM.RestrictNTLM = $true
+                        }
+
+                        # Check for AuditReceivingNTLMTraffic
+                        if ($content -match 'AuditReceivingNTLMTraffic') {
+                            $gpoEnforcesNTLM.AuditNTLM = $true
+                        }
+                    }
+
+                    # Check Group Policy Preferences for NTLM registry settings
+                    $prefPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Preferences\Registry\Registry.xml"
+                    if (Test-Path $prefPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $prefPath -Raw -ErrorAction SilentlyContinue
+                        if ($content -match 'LmCompatibilityLevel') {
+                            $gpoEnforcesNTLM.LmCompatibilityLevel = $true
+                        }
+                        if ($content -match 'RestrictReceivingNTLMTraffic' -or $content -match 'RestrictSendingNTLMTraffic') {
+                            $gpoEnforcesNTLM.RestrictNTLM = $true
+                        }
+                    }
+                } catch {
+                    Write-Verbose "AUTH-NTLMRestriction: Could not check GPO $($gpo.DisplayName): $_"
+                }
+            }
+        }
+
+        # Report missing GPO enforcement
+        if (-not $gpoEnforcesNTLM.LmCompatibilityLevel) {
+            $findings += [PSCustomObject]@{
+                ObjectType           = 'GPO Policy'
+                DomainController     = 'Domain-wide'
+                LmCompatibilityLevel = 'No GPO enforces LmCompatibilityLevel=5'
+                RestrictNTLM         = 'N/A'
+                AuditNTLM            = 'N/A'
+                NTLMMinServerSec     = 'N/A'
+                Issues               = 'LmCompatibilityLevel not enforced via GPO - DC configurations may drift'
+                RiskLevel            = 'High'
+                Attacks              = 'NTLM Relay, Pass-the-Hash, Credential Theft'
+                DistinguishedName    = 'N/A'
+                ConfigSource         = 'Missing GPO'
+            }
+        }
+
+        if (-not $gpoEnforcesNTLM.RestrictNTLM -and -not $gpoEnforcesNTLM.AuditNTLM) {
+            $findings += [PSCustomObject]@{
+                ObjectType           = 'GPO Policy'
+                DomainController     = 'Domain-wide'
+                LmCompatibilityLevel = 'N/A'
+                RestrictNTLM         = 'No GPO restricts NTLM'
+                AuditNTLM            = 'No GPO audits NTLM'
+                NTLMMinServerSec     = 'N/A'
+                Issues               = 'NTLM restriction/auditing not enforced via GPO'
+                RiskLevel            = 'Medium'
+                Attacks              = 'NTLM Relay, Pass-the-Hash, Credential Theft'
+                DistinguishedName    = 'N/A'
+                ConfigSource         = 'Missing GPO'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check each DC's actual NTLM configuration
+        # ========================================================================
         if ($Data.DomainControllers) {
             foreach ($dc in $Data.DomainControllers) {
                 $dcName = $dc.Name
@@ -134,29 +228,33 @@
 
                     if ($isVulnerable -or $issues.Count -gt 0) {
                         $findings += [PSCustomObject]@{
-                            DomainController    = $dcName
+                            ObjectType           = 'DC Configuration'
+                            DomainController     = $dcName
                             LmCompatibilityLevel = $ntlmSettings.LmCompatibilityLevel
-                            RestrictNTLM        = $ntlmSettings.RestrictNTLMInDomain
-                            AuditNTLM           = $ntlmSettings.AuditNTLMInDomain
-                            NTLMMinServerSec    = if ($ntlmSettings.NTLMMinServerSec) { "0x$($ntlmSettings.NTLMMinServerSec.ToString('X'))" } else { 'Not set' }
-                            Issues              = ($issues -join '; ')
-                            RiskLevel           = if ($isVulnerable) { 'High' } else { 'Medium' }
-                            Attacks             = 'NTLM Relay, Pass-the-Hash, Credential Theft'
-                            DistinguishedName   = $dc.DistinguishedName
+                            RestrictNTLM         = $ntlmSettings.RestrictNTLMInDomain
+                            AuditNTLM            = $ntlmSettings.AuditNTLMInDomain
+                            NTLMMinServerSec     = if ($ntlmSettings.NTLMMinServerSec) { "0x$($ntlmSettings.NTLMMinServerSec.ToString('X'))" } else { 'Not set' }
+                            Issues               = ($issues -join '; ')
+                            RiskLevel            = if ($isVulnerable) { 'High' } else { 'Medium' }
+                            Attacks              = 'NTLM Relay, Pass-the-Hash, Credential Theft'
+                            DistinguishedName    = $dc.DistinguishedName
+                            ConfigSource         = 'Registry'
                         }
                     }
 
                 } catch {
                     $findings += [PSCustomObject]@{
-                        DomainController    = $dcName
+                        ObjectType           = 'DC Configuration'
+                        DomainController     = $dcName
                         LmCompatibilityLevel = 'Unknown'
-                        RestrictNTLM        = 'Unknown'
-                        AuditNTLM           = 'Unknown'
-                        NTLMMinServerSec    = 'Unknown'
-                        Issues              = 'Unable to verify NTLM settings'
-                        RiskLevel           = 'Unknown'
-                        Attacks             = 'NTLM Relay, Pass-the-Hash, Credential Theft'
-                        DistinguishedName   = $dc.DistinguishedName
+                        RestrictNTLM         = 'Unknown'
+                        AuditNTLM            = 'Unknown'
+                        NTLMMinServerSec     = 'Unknown'
+                        Issues               = 'Unable to verify NTLM settings'
+                        RiskLevel            = 'Unknown'
+                        Attacks              = 'NTLM Relay, Pass-the-Hash, Credential Theft'
+                        DistinguishedName    = $dc.DistinguishedName
+                        ConfigSource         = 'Unknown'
                     }
                 }
             }
