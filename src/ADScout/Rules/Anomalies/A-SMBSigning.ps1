@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'Anomalies'
     Title       = 'SMB Signing Not Required'
-    Description = 'SMB signing is not enforced on Domain Controllers, enabling NTLM relay attacks. Attackers can intercept SMB authentication and relay it to other systems to gain unauthorized access.'
+    Description = 'SMB signing is not enforced on Domain Controllers, enabling NTLM relay attacks. Checks both DC registry configuration AND GPO enforcement to ensure consistent domain-wide protection.'
     Severity    = 'High'
     Weight      = 30
-    DataSource  = 'DomainControllers'
+    DataSource  = 'DomainControllers,GPOs'
 
     References  = @(
         @{ Title = 'SMB Signing Overview'; Url = 'https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/overview-server-message-block-signing' }
@@ -32,8 +32,64 @@
         param($Data, $Domain)
 
         $findings = @()
+        $dcs = if ($Data.DomainControllers) { $Data.DomainControllers } else { $Data }
 
-        foreach ($dc in $Data) {
+        # ========================================================================
+        # BELT: Check GPO enforcement for SMB signing
+        # ========================================================================
+        $gpoEnforcesSmbSigning = $false
+
+        if ($Data.GPOs) {
+            foreach ($gpo in $Data.GPOs) {
+                try {
+                    # Check if GPO contains SMB signing policy
+                    # "Microsoft network server: Digitally sign communications (always)"
+                    # Registry: RequireSecuritySignature = 1
+                    $gpoPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf"
+
+                    if (Test-Path $gpoPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $gpoPath -Raw -ErrorAction SilentlyContinue
+                        # RequireSecuritySignature = 4,1 means enabled (4 = REG_DWORD, 1 = value)
+                        if ($content -match 'RequireSecuritySignature\s*=\s*4,1') {
+                            $gpoEnforcesSmbSigning = $true
+                            break
+                        }
+                    }
+
+                    # Also check registry.pol for SMB signing
+                    $regPolPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Registry.pol"
+                    if (Test-Path $regPolPath -ErrorAction SilentlyContinue) {
+                        $bytes = [System.IO.File]::ReadAllBytes($regPolPath)
+                        $content = [System.Text.Encoding]::Unicode.GetString($bytes)
+                        if ($content -match 'LanmanServer.*RequireSecuritySignature') {
+                            $gpoEnforcesSmbSigning = $true
+                            break
+                        }
+                    }
+                } catch {
+                    Write-Verbose "A-SMBSigning: Could not check GPO $($gpo.DisplayName): $_"
+                }
+            }
+        }
+
+        if (-not $gpoEnforcesSmbSigning) {
+            $findings += [PSCustomObject]@{
+                ObjectType               = 'GPO Policy'
+                DomainController         = 'Domain-wide'
+                OperatingSystem          = 'N/A'
+                RequireSecuritySignature = 'Not Enforced'
+                EnableSecuritySignature  = 'N/A'
+                SigningStatus            = 'No GPO requires SMB signing'
+                RiskLevel                = 'High'
+                AttackVector             = 'DC configurations may drift - no policy enforcement'
+                ConfigSource             = 'Missing GPO'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check each Domain Controller's actual configuration
+        # ========================================================================
+        foreach ($dc in $dcs) {
             try {
                 $requireSecuritySignature = $null
                 $enableSecuritySignature = $null
@@ -64,7 +120,6 @@
                 }
 
                 # Check if SMB signing is required
-                # RequireSecuritySignature: 0 = Not Required, 1 = Required
                 $signingRequired = $requireSecuritySignature -eq 1
                 $signingEnabled = $enableSecuritySignature -eq 1
 
@@ -78,6 +133,7 @@
 
                 if (-not $signingRequired) {
                     $findings += [PSCustomObject]@{
+                        ObjectType               = 'DC Configuration'
                         DomainController         = $dc.Name
                         OperatingSystem          = $dc.OperatingSystem
                         RequireSecuritySignature = $requireSecuritySignature
@@ -85,10 +141,12 @@
                         SigningStatus            = $status
                         RiskLevel                = if (-not $signingEnabled) { 'Critical' } else { 'High' }
                         AttackVector             = 'NTLM Relay attacks, SMB authentication interception'
+                        ConfigSource             = 'Registry'
                     }
                 }
             } catch {
                 $findings += [PSCustomObject]@{
+                    ObjectType               = 'DC Configuration'
                     DomainController         = $dc.Name
                     OperatingSystem          = $dc.OperatingSystem
                     RequireSecuritySignature = 'Unable to determine'
@@ -96,6 +154,7 @@
                     SigningStatus            = 'Requires manual verification'
                     RiskLevel                = 'Unknown'
                     AttackVector             = 'NTLM Relay attacks if not properly configured'
+                    ConfigSource             = 'Unknown'
                 }
             }
         }

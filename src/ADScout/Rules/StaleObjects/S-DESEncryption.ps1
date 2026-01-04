@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'StaleObjects'
     Title       = 'DES Kerberos Encryption Enabled'
-    Description = 'Accounts configured to use weak DES encryption for Kerberos authentication. DES is cryptographically broken and provides no security.'
+    Description = 'Accounts configured to use weak DES encryption for Kerberos authentication. DES is cryptographically broken and provides no security. Also checks KDC policy to ensure DES is blocked domain-wide.'
     Severity    = 'High'
     Weight      = 30
-    DataSource  = 'Users'
+    DataSource  = 'Users,DomainControllers'
 
     References  = @(
         @{ Title = 'Kerberos Encryption Types'; Url = 'https://learn.microsoft.com/en-us/windows-server/security/kerberos/kerberos-supported-encryption-types' }
@@ -35,33 +35,109 @@
 
         # USE_DES_KEY_ONLY = 0x200000 (2097152)
         $USE_DES_KEY_ONLY = 2097152
+        $DES_FLAGS = 0x3  # DES-CBC-CRC (0x1) + DES-CBC-MD5 (0x2)
 
-        foreach ($user in $Data) {
+        # ========================================================================
+        # BELT: Check KDC policy - does the domain allow DES at all?
+        # ========================================================================
+        if ($Data.DomainControllers) {
+            foreach ($dc in $Data.DomainControllers) {
+                try {
+                    $kdcPolicy = Invoke-Command -ComputerName $dc.DNSHostName -ScriptBlock {
+                        $regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters'
+                        $defaultPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters'
+
+                        $result = @{ SupportedEncryptionTypes = $null; DefaultEncTypes = $null }
+
+                        if (Test-Path $regPath) {
+                            $policy = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+                            if ($policy.SupportedEncryptionTypes) {
+                                $result.SupportedEncryptionTypes = $policy.SupportedEncryptionTypes
+                            }
+                        }
+                        if (Test-Path $defaultPath) {
+                            $defaults = Get-ItemProperty -Path $defaultPath -ErrorAction SilentlyContinue
+                            if ($defaults.DefaultDomainSupportedEncTypes) {
+                                $result.DefaultEncTypes = $defaults.DefaultDomainSupportedEncTypes
+                            }
+                        }
+                        return $result
+                    } -ErrorAction SilentlyContinue
+
+                    if ($kdcPolicy) {
+                        $kdcEncTypes = $kdcPolicy.SupportedEncryptionTypes ?? $kdcPolicy.DefaultEncTypes
+                        $policySource = if ($kdcPolicy.SupportedEncryptionTypes) { 'GPO' } else { 'Default' }
+
+                        if ($kdcEncTypes -and ($kdcEncTypes -band $DES_FLAGS)) {
+                            $findings += [PSCustomObject]@{
+                                ObjectType        = 'KDC Policy'
+                                SamAccountName    = $dc.Name
+                                DisplayName       = 'Domain Controller KDC Policy'
+                                EncryptionTypes   = "0x$($kdcEncTypes.ToString('X'))"
+                                DESEnabled        = $true
+                                Enabled           = 'N/A'
+                                DistinguishedName = $dc.DistinguishedName
+                                Risk              = 'CRITICAL: KDC accepts DES requests domain-wide'
+                                PolicySource      = $policySource
+                            }
+                        } elseif (-not $kdcEncTypes) {
+                            # No explicit policy - older DFLs may allow DES by default
+                            $findings += [PSCustomObject]@{
+                                ObjectType        = 'KDC Policy'
+                                SamAccountName    = $dc.Name
+                                DisplayName       = 'Domain Controller KDC Policy'
+                                EncryptionTypes   = 'Not Configured'
+                                DESEnabled        = 'Unknown'
+                                Enabled           = 'N/A'
+                                DistinguishedName = $dc.DistinguishedName
+                                Risk              = 'No explicit encryption policy - may allow DES depending on DFL'
+                                PolicySource      = 'None'
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Verbose "S-DESEncryption: Could not query KDC policy on $($dc.Name): $_"
+                }
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check individual accounts for DES configuration
+        # ========================================================================
+        $users = if ($Data.Users) { $Data.Users } else { $Data }
+
+        foreach ($user in $users) {
+            # Skip if this is a DC object (already checked above)
+            if ($user.ObjectClass -eq 'computer') { continue }
+
+            # Check UAC flag USE_DES_KEY_ONLY
             if ($user.UserAccountControl -band $USE_DES_KEY_ONLY) {
                 $findings += [PSCustomObject]@{
+                    ObjectType        = 'User Account'
                     SamAccountName    = $user.SamAccountName
                     DisplayName       = $user.DisplayName
                     UserAccountControl = $user.UserAccountControl
                     Enabled           = $user.Enabled
                     PasswordLastSet   = $user.PasswordLastSet
                     DistinguishedName = $user.DistinguishedName
-                    Risk              = 'DES encryption is cryptographically broken'
+                    Risk              = 'USE_DES_KEY_ONLY flag set - DES is cryptographically broken'
+                    PolicySource      = 'Account Flag'
                 }
             }
 
-            # Also check msDS-SupportedEncryptionTypes for DES (0x1 = DES-CBC-CRC, 0x2 = DES-CBC-MD5)
-            if ($user.'msDS-SupportedEncryptionTypes') {
-                $encTypes = $user.'msDS-SupportedEncryptionTypes'
-                if ($encTypes -band 0x3) {
-                    $findings += [PSCustomObject]@{
-                        SamAccountName      = $user.SamAccountName
-                        DisplayName         = $user.DisplayName
-                        EncryptionTypes     = $encTypes
-                        DESEnabled          = $true
-                        Enabled             = $user.Enabled
-                        DistinguishedName   = $user.DistinguishedName
-                        Risk                = 'Account supports DES encryption types'
-                    }
+            # Check msDS-SupportedEncryptionTypes for DES
+            $encTypes = $user.'msDS-SupportedEncryptionTypes'
+            if ($encTypes -and ($encTypes -band $DES_FLAGS)) {
+                $findings += [PSCustomObject]@{
+                    ObjectType        = 'User Account'
+                    SamAccountName    = $user.SamAccountName
+                    DisplayName       = $user.DisplayName
+                    EncryptionTypes   = "0x$($encTypes.ToString('X'))"
+                    DESEnabled        = $true
+                    Enabled           = $user.Enabled
+                    DistinguishedName = $user.DistinguishedName
+                    Risk              = 'Account explicitly supports DES encryption types'
+                    PolicySource      = 'msDS-SupportedEncryptionTypes'
                 }
             }
         }
