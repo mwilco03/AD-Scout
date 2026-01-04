@@ -66,7 +66,9 @@
                             $enabledScopes = $result.Properties['msds-enabledfeature']
                             $recycleBinEnabled = $enabledScopes.Count -gt 0
                         }
-                    } catch { }
+                    } catch {
+                        Write-Verbose "P-RecycleBin: ADSI search for Recycle Bin Feature failed: $_"
+                    }
                 }
             }
 
@@ -80,7 +82,9 @@
                     try {
                         $rootDSE = [ADSI]"LDAP://RootDSE"
                         $forestLevel = $rootDSE.forestFunctionality.ToString()
-                    } catch { }
+                    } catch {
+                        Write-Verbose "P-RecycleBin: Could not determine forest functional level via ADSI: $_"
+                    }
                 }
 
                 # Recycle Bin requires Windows Server 2008 R2 forest functional level or higher
@@ -122,7 +126,9 @@
                         Impact              = 'Deleted objects may become unrecoverable sooner'
                     }
                 }
-            } catch { }
+            } catch {
+                Write-Verbose "P-RecycleBin: Could not read tombstone lifetime from $($dsService.distinguishedName): $_"
+            }
 
         } catch {
             Write-Verbose "P-RecycleBin: Error - $_"

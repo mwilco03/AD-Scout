@@ -71,7 +71,9 @@
                             try {
                                 # Check process protection level
                                 $isPPL = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -ErrorAction SilentlyContinue).RunAsPPL -eq 1
-                            } catch {}
+                            } catch {
+                                Write-Verbose "Could not determine LSASS PPL status: $_"
+                            }
                         }
 
                         @{

@@ -57,7 +57,9 @@
             $enrollmentServices = Get-ADObject -Filter { objectClass -eq 'pKIEnrollmentService' } `
                 -SearchBase "CN=Enrollment Services,CN=Public Key Services,CN=Services,$configNC" `
                 -Properties * -ErrorAction SilentlyContinue
-        } catch {}
+        } catch {
+            Write-Verbose "C-ESC11-ICPR: Could not query enrollment services from $configNC : $_"
+        }
 
         foreach ($ca in $enrollmentServices) {
             $caName = $ca.Name
@@ -99,13 +101,17 @@
                                 $result.RequireSSL = $true
                             }
                         }
-                    } catch {}
+                    } catch {
+                        Write-Verbose "Could not read InterfaceFlags for CA $CAName : $_"
+                    }
 
                     # Check if NTLM is allowed for RPC
                     try {
                         $rpcAuth = & certutil -config "$env:COMPUTERNAME\$CAName" -getreg Policy\EditFlags 2>$null
                         # Various flags affect authentication
-                    } catch {}
+                    } catch {
+                        Write-Verbose "Could not read EditFlags for CA $CAName : $_"
+                    }
 
                     # Check RPC security settings
                     try {

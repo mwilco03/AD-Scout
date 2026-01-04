@@ -65,7 +65,9 @@
                     $searcher.SearchRoot = [ADSI]"LDAP://$domainDN"
                     $searcher.Filter = "(objectClass=msDS-GroupManagedServiceAccount)"
                     $gmsaCount = $searcher.FindAll().Count
-                } catch { }
+                } catch {
+                    Write-Verbose "A-NoServicePolicy: Could not query gMSAs from $domainDN : $_"
+                }
             }
 
             # Check if KDS root key exists (required for gMSA)
@@ -76,7 +78,9 @@
                 if ($kdsContainer.Children) {
                     $kdsKeyExists = ($kdsContainer.Children | Measure-Object).Count -gt 0
                 }
-            } catch { }
+            } catch {
+                Write-Verbose "A-NoServicePolicy: Could not check KDS root keys in $configNC : $_"
+            }
 
             # Report findings
             if (-not $kdsKeyExists) {

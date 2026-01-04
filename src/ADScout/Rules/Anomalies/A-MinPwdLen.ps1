@@ -62,7 +62,9 @@
                         $domainDN = $rootDSE.defaultNamingContext.ToString()
                         $domain = [ADSI]"LDAP://$domainDN"
                         $minPwdLength = $domain.minPwdLength.Value
-                    } catch { }
+                    } catch {
+                        Write-Verbose "A-MinPwdLen: Could not read minPwdLength from $domainDN via ADSI: $_"
+                    }
                 }
             }
 
@@ -122,7 +124,9 @@
                         }
                     }
                 }
-            } catch { }
+            } catch {
+                Write-Verbose "A-MinPwdLen: Could not enumerate Fine-Grained Password Policies: $_"
+            }
 
         } catch {
             Write-Verbose "A-MinPwdLen: Error - $_"

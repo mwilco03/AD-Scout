@@ -95,7 +95,9 @@
                         $adcsVulnerable = $true
                         $issues += 'ADCS Certificate Services running (potential relay target)'
                     }
-                } catch {}
+                } catch {
+                    Write-Verbose "AV-DFSCoerce: Could not check CertSvc on $dcName : $_"
+                }
 
                 # Check RPC filter configuration
                 try {
@@ -146,7 +148,9 @@
                         DistinguishedName   = 'N/A'
                     }
                 }
-            } catch {}
+            } catch {
+                Write-Verbose "AV-DFSCoerce: Could not check for ADCS in CN=Configuration,$($Domain.DistinguishedName): $_"
+            }
         }
 
         return $findings
