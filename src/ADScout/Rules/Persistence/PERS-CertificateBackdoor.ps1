@@ -114,7 +114,9 @@
                     }
                 }
             }
-        } catch {}
+        } catch {
+            Write-Verbose "PERS-CertificateBackdoor: Could not enumerate certificate templates from $configNC : $_"
+        }
 
         # Check for recently issued suspicious certificates from CA
         if ($Data.DomainControllers) {
@@ -174,9 +176,13 @@
                                 DistinguishedName = "RequestID: $($cert.RequestID)"
                             }
                         }
-                    } catch {}
+                    } catch {
+                        Write-Verbose "PERS-CertificateBackdoor: Could not parse cert for $($cert.CommonName): $_"
+                    }
                 }
-            } catch {}
+            } catch {
+                Write-Verbose "PERS-CertificateBackdoor: Could not query issued certificates from CA on $dcName : $_"
+            }
         }
 
         # Check for certificates published in AD for users
@@ -211,10 +217,14 @@
                                 DistinguishedName = $user.DistinguishedName
                             }
                         }
-                    } catch {}
+                    } catch {
+                        Write-Verbose "PERS-CertificateBackdoor: Could not parse userCertificate for $($user.SamAccountName): $_"
+                    }
                 }
             }
-        } catch {}
+        } catch {
+            Write-Verbose "PERS-CertificateBackdoor: Could not enumerate users with certificates: $_"
+        }
 
         return $findings
     }
