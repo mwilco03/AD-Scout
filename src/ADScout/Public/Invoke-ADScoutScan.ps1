@@ -146,46 +146,46 @@ function Invoke-ADScoutScan {
 
         # Define collectors to run - each returns a key-value pair
         $collectors = @(
-            @{ Key = 'Users';        Collector = { param($p) Get-ADScoutUserData @p } }
-            @{ Key = 'Computers';    Collector = { param($p) Get-ADScoutComputerData @p } }
-            @{ Key = 'Groups';       Collector = { param($p) Get-ADScoutGroupData @p } }
-            @{ Key = 'Trusts';       Collector = { param($p) Get-ADScoutTrustData @p } }
-            @{ Key = 'GPOs';         Collector = { param($p) Get-ADScoutGPOData @p } }
-            @{ Key = 'Certificates'; Collector = { param($p) Get-ADScoutCertificateData @p } }
+            @{ Key = 'Users';        Collector = 'Get-ADScoutUserData' }
+            @{ Key = 'Computers';    Collector = 'Get-ADScoutComputerData' }
+            @{ Key = 'Groups';       Collector = 'Get-ADScoutGroupData' }
+            @{ Key = 'Trusts';       Collector = 'Get-ADScoutTrustData' }
+            @{ Key = 'GPOs';         Collector = 'Get-ADScoutGPOData' }
+            @{ Key = 'Certificates'; Collector = 'Get-ADScoutCertificateData' }
         )
 
-        # Check if we can use parallel collection (PS7+ is safest for LDAP connections)
-        $useParallelCollection = $PSVersionTable.PSVersion.Major -ge 7 -and $ThrottleLimit -gt 1
+        # Use parallel collection via Invoke-ADScoutParallel (works on PS 5.1+ via ThreadJob/Runspace fallback)
+        if ($ThrottleLimit -gt 1) {
+            Write-Verbose "Using parallel data collection via Invoke-ADScoutParallel (ThrottleLimit=$ThrottleLimit)"
 
-        if ($useParallelCollection) {
-            Write-Verbose "Using parallel data collection (ThrottleLimit=$ThrottleLimit)"
-
-            # PS7+ parallel collection
-            $collectors | ForEach-Object -Parallel {
-                $collector = $_
-                $params = $using:adDataParams
-                $data = $using:adData
-
+            # Collector scriptblock - receives collector config and params
+            $collectorScript = {
+                param($collector, $params, $dataRef)
                 try {
-                    $result = & $collector.Collector -p $params
-                    $data[$collector.Key] = $result
+                    $result = & $collector.Collector @params
+                    $dataRef[$collector.Key] = $result
                 }
                 catch {
                     Write-Warning "Collector $($collector.Key) failed: $_"
-                    $data[$collector.Key] = @()
+                    $dataRef[$collector.Key] = @()
                 }
-            } -ThrottleLimit ([Math]::Min($ThrottleLimit, $collectors.Count))
+            }
+
+            $collectors | Invoke-ADScoutParallel -ScriptBlock $collectorScript `
+                -ArgumentList $adDataParams, $adData `
+                -ThrottleLimit ([Math]::Min($ThrottleLimit, $collectors.Count)) `
+                -ProgressActivity "Collecting AD Data"
         }
         else {
-            Write-Verbose "Using sequential data collection"
+            Write-Verbose "Using sequential data collection (ThrottleLimit=1)"
 
-            # Sequential collection (PS 5.1 or single-threaded)
+            # Sequential collection
             foreach ($collector in $collectors) {
                 try {
                     Write-Progress -Activity "Collecting AD Data" -Status $collector.Key -PercentComplete (
                         ($collectors.IndexOf($collector) / $collectors.Count) * 100
                     )
-                    $adData[$collector.Key] = & $collector.Collector -p $adDataParams
+                    $adData[$collector.Key] = & $collector.Collector @adDataParams
                 }
                 catch {
                     Write-Warning "Collector $($collector.Key) failed: $_"
@@ -223,80 +223,31 @@ function Invoke-ADScoutScan {
 
         Write-Verbose "Data collection complete"
 
-        # Execute rules - use Invoke-RuleEvaluation for consistent handling
+        # Execute rules
         $results = [System.Collections.Generic.List[PSCustomObject]]::new()
         $totalRules = $rules.Count
 
-        # Define rule execution scriptblock for reuse
-        $executeRule = {
-            param($rule, $adData, $domainName)
-
-            # Check prerequisites
-            if ($rule.Prerequisites) {
-                try {
-                    $prereqResult = & $rule.Prerequisites -ADData $adData
-                    if (-not $prereqResult) {
-                        return $null  # Prerequisites not met
-                    }
-                }
-                catch {
-                    return $null  # Prerequisite check failed
-                }
-            }
-
-            # Execute the rule using Invoke-RuleEvaluation for consistent scoring
-            try {
-                $finding = Invoke-RuleEvaluation -Rule $rule -Data $adData -Domain $domainName
-                return $finding
-            }
-            catch {
-                # Return error result
-                return [PSCustomObject]@{
-                    PSTypeName   = 'ADScoutResult'
-                    RuleId       = $rule.Id
-                    RuleName     = $rule.Name
-                    Category     = $rule.Category
-                    Description  = "Error executing rule: $_"
-                    FindingCount = 0
-                    Score        = 0
-                    MaxScore     = $rule.MaxPoints
-                    Findings     = @()
-                    Error        = $_.Exception.Message
-                    ExecutedAt   = Get-Date
-                }
-            }
-        }
-
         # Check if we should use parallel rule execution
-        # Only use parallel for PS7+ with many rules (overhead not worth it for few rules)
-        $useParallelRules = $PSVersionTable.PSVersion.Major -ge 7 -and $ThrottleLimit -gt 1 -and $totalRules -gt 10
+        # Use parallel via Invoke-ADScoutParallel (works on PS 5.1+ via ThreadJob/Runspace fallback)
+        $useParallelRules = $ThrottleLimit -gt 1 -and $totalRules -gt 10
 
         if ($useParallelRules) {
-            Write-Verbose "Using parallel rule execution for $totalRules rules (ThrottleLimit=$ThrottleLimit)"
+            Write-Verbose "Using parallel rule execution via Invoke-ADScoutParallel for $totalRules rules (ThrottleLimit=$ThrottleLimit)"
 
-            # Thread-safe results collection
-            $parallelResults = [System.Collections.Concurrent.ConcurrentBag[PSCustomObject]]::new()
-            $completedCount = [ref]0
-
-            $rules | ForEach-Object -Parallel {
-                $rule = $_
-                $data = $using:adData
-                $domainName = $using:Domain
-                $resultsBag = $using:parallelResults
-                $completed = $using:completedCount
+            # Rule execution scriptblock for Invoke-ADScoutParallel
+            $ruleScript = {
+                param($rule, $data, $domainName)
 
                 # Check prerequisites
                 if ($rule.Prerequisites) {
                     try {
                         $prereqResult = & $rule.Prerequisites -ADData $data
                         if (-not $prereqResult) {
-                            [System.Threading.Interlocked]::Increment($completed)
-                            return
+                            return $null
                         }
                     }
                     catch {
-                        [System.Threading.Interlocked]::Increment($completed)
-                        return
+                        return $null
                     }
                 }
 
@@ -316,7 +267,7 @@ function Invoke-ADScoutScan {
                             default { $findingCount * $rule.Points }
                         }
 
-                        $result = [PSCustomObject]@{
+                        return [PSCustomObject]@{
                             PSTypeName   = 'ADScoutResult'
                             RuleId       = $rule.Id
                             RuleName     = $rule.Name
@@ -334,21 +285,26 @@ function Invoke-ADScoutScan {
                             References   = $rule.References
                             ExecutedAt   = Get-Date
                         }
-
-                        $resultsBag.Add($result)
                     }
                 }
                 catch {
-                    # Log but don't fail entire scan
                     Write-Warning "Error executing rule $($rule.Id): $_"
                 }
 
-                [System.Threading.Interlocked]::Increment($completed)
-            } -ThrottleLimit $ThrottleLimit
+                return $null
+            }
 
-            # Convert concurrent bag to list
+            # Execute rules in parallel and collect results
+            $parallelResults = $rules | Invoke-ADScoutParallel -ScriptBlock $ruleScript `
+                -ArgumentList $adData, $Domain `
+                -ThrottleLimit $ThrottleLimit `
+                -ProgressActivity "Executing security rules"
+
+            # Add non-null results to results list
             foreach ($item in $parallelResults) {
-                $results.Add($item)
+                if ($null -ne $item) {
+                    $results.Add($item)
+                }
             }
         }
         else {
