@@ -108,7 +108,8 @@
                         $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
 
                         foreach ($legitSID in $legitimateSIDs) {
-                            if ($sid -eq $legitSID -or $sid -like "$legitSID*") {
+                            # Use exact match only - wildcard matching could miss backdoors
+                            if ($sid -eq $legitSID) {
                                 $isDefault = $true
                                 break
                             }
@@ -147,6 +148,8 @@
             }
 
             # Also check if SDProp interval has been modified (should be 60 minutes)
+            # dsHeuristics position 16 (index 15) = AdminSDProtectFrequency
+            # '0' = default 60 minutes, '1'-'9' = N * 60 minutes
             $dsHeuristics = $null
             try {
                 $configNC = ([ADSI]"LDAP://RootDSE").configurationNamingContext
@@ -155,8 +158,9 @@
 
                 if ($dsHeuristics -and $dsHeuristics.Length -ge 16) {
                     $sdPropInterval = $dsHeuristics.Substring(15, 1)
-                    if ($sdPropInterval -ne '0') {
-                        # Custom SDProp interval
+                    # '0' means default (60 minutes), non-zero is a multiplier
+                    if ($sdPropInterval -ne '0' -and $sdPropInterval -match '[1-9]') {
+                        # Custom SDProp interval: value * 60 minutes
                         $intervalMinutes = [int]$sdPropInterval * 60
                         $findings += [PSCustomObject]@{
                             Trustee             = 'SDProp Configuration'

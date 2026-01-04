@@ -15,7 +15,7 @@
 
     MITRE = @{
         Tactics    = @('TA0006', 'TA0004')  # Credential Access, Privilege Escalation
-        Techniques = @('T1558.001')          # Steal or Forge Kerberos Tickets: Golden Ticket
+        Techniques = @('T1558', 'T1550.003')  # Steal or Forge Kerberos Tickets, Pass the Ticket
     }
 
     CIS   = @('5.14')

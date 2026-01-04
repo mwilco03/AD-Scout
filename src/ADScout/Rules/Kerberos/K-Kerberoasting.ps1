@@ -44,15 +44,21 @@
                     (New-TimeSpan -Start $user.PasswordLastSet -End (Get-Date)).Days
                 } else { 'Never Set' }
 
-                # Check encryption types
+                # Check encryption types - detect if ONLY weak encryption is available
+                # Encryption type flags:
+                # 0x01 = DES-CBC-CRC, 0x02 = DES-CBC-MD5, 0x04 = RC4-HMAC (all weak)
+                # 0x08 = AES128-CTS-HMAC-SHA1-96, 0x10 = AES256-CTS-HMAC-SHA1-96 (strong)
                 $weakEncryption = $false
-                if ($user.msDS-SupportedEncryptionTypes) {
-                    # RC4 = 0x4, DES = 0x1, 0x2
-                    if ($user.'msDS-SupportedEncryptionTypes' -band 0x7) {
+                $encTypes = $user.'msDS-SupportedEncryptionTypes'
+                if ($encTypes) {
+                    # Check if AES is NOT available (no 0x08 or 0x10)
+                    $hasAES = ($encTypes -band 0x18) -ne 0
+                    # Account is weak if it has NO AES support
+                    if (-not $hasAES) {
                         $weakEncryption = $true
                     }
                 } else {
-                    # No encryption types set defaults to RC4
+                    # No encryption types set defaults to RC4 only
                     $weakEncryption = $true
                 }
 

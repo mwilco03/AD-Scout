@@ -31,8 +31,8 @@
     )
 
     MITRE = @{
-        Tactics    = @('TA0040')  # Impact
-        Techniques = @('T1498')   # Resource Hijacking (time manipulation)
+        Tactics    = @()  # Infrastructure configuration - no direct attack mapping
+        Techniques = @()  # Time skew affects Kerberos auth but isn't an attack technique
     }
 
     CIS   = @('2.3')
