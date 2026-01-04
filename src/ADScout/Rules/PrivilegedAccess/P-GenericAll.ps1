@@ -49,26 +49,7 @@
 
         $findings = @()
 
-        # Legitimate principals that may have GenericAll
-        $legitimatePrincipals = @(
-            'Domain Admins'
-            'Enterprise Admins'
-            'Administrators'
-            'SYSTEM'
-            'SELF'
-            'Account Operators'
-            'CREATOR OWNER'
-        )
-
-        $legitimateSIDPatterns = @(
-            'S-1-5-32-544'      # Administrators
-            'S-1-5-18'          # SYSTEM
-            'S-1-5-10'          # SELF
-            'S-1-3-0'           # Creator Owner
-            'S-1-5-9'           # Enterprise DCs
-        )
-
-        # Check privileged users
+        # Check privileged users using centralized ACL validation
         if ($Data.Users) {
             $privilegedUsers = $Data.Users | Where-Object {
                 $_.AdminCount -eq 1 -or
@@ -76,43 +57,24 @@
             } | Select-Object -First 20  # Limit for performance
 
             foreach ($user in $privilegedUsers) {
-                try {
-                    $userDN = $user.DistinguishedName
-                    if (-not $userDN) { continue }
+                if (-not $user.DistinguishedName) { continue }
 
-                    $adsiObj = [ADSI]"LDAP://$userDN"
-                    $acl = $adsiObj.ObjectSecurity
+                $aclFindings = Test-ADScoutACLViolation -DistinguishedName $user.DistinguishedName `
+                    -RightsToCheck 'GenericAll' `
+                    -TargetName $user.SamAccountName `
+                    -TargetType 'Privileged User'
 
-                    foreach ($ace in $acl.Access) {
-                        if ($ace.AccessControlType -ne 'Allow') { continue }
-                        if ($ace.ActiveDirectoryRights -notmatch 'GenericAll') { continue }
-
-                        $identity = $ace.IdentityReference.Value
-
-                        # Check if legitimate
-                        $isLegitimate = $false
-                        foreach ($legit in $legitimatePrincipals) {
-                            if ($identity -like "*$legit*") {
-                                $isLegitimate = $true
-                                break
-                            }
-                        }
-
-                        if (-not $isLegitimate) {
-                            $findings += [PSCustomObject]@{
-                                TargetObject        = $user.SamAccountName
-                                TargetType          = 'Privileged User'
-                                Principal           = $identity
-                                Rights              = 'GenericAll'
-                                Inherited           = $ace.IsInherited
-                                AttackPath          = 'Can reset password, set SPN for Kerberoasting, or modify account'
-                                RiskLevel           = 'Critical'
-                                DistinguishedName   = $userDN
-                            }
-                        }
+                foreach ($finding in $aclFindings) {
+                    $findings += [PSCustomObject]@{
+                        TargetObject      = $finding.TargetObject
+                        TargetType        = $finding.TargetType
+                        Principal         = $finding.Principal
+                        Rights            = 'GenericAll'
+                        Inherited         = $finding.Inherited
+                        AttackPath        = 'Can reset password, set SPN for Kerberoasting, or modify account'
+                        RiskLevel         = 'Critical'
+                        DistinguishedName = $finding.DistinguishedName
                     }
-                } catch {
-                    # Skip objects we can't access
                 }
             }
         }
@@ -125,43 +87,24 @@
             }
 
             foreach ($group in $privilegedGroups) {
-                try {
-                    $groupDN = $group.DistinguishedName
-                    if (-not $groupDN) { continue }
+                if (-not $group.DistinguishedName) { continue }
 
-                    $adsiObj = [ADSI]"LDAP://$groupDN"
-                    $acl = $adsiObj.ObjectSecurity
+                $aclFindings = Test-ADScoutACLViolation -DistinguishedName $group.DistinguishedName `
+                    -RightsToCheck 'GenericAll' `
+                    -TargetName $group.SamAccountName `
+                    -TargetType 'Privileged Group'
 
-                    foreach ($ace in $acl.Access) {
-                        if ($ace.AccessControlType -ne 'Allow') { continue }
-                        if ($ace.ActiveDirectoryRights -notmatch 'GenericAll') { continue }
-
-                        $identity = $ace.IdentityReference.Value
-
-                        # Check if legitimate
-                        $isLegitimate = $false
-                        foreach ($legit in $legitimatePrincipals) {
-                            if ($identity -like "*$legit*") {
-                                $isLegitimate = $true
-                                break
-                            }
-                        }
-
-                        if (-not $isLegitimate) {
-                            $findings += [PSCustomObject]@{
-                                TargetObject        = $group.SamAccountName
-                                TargetType          = 'Privileged Group'
-                                Principal           = $identity
-                                Rights              = 'GenericAll'
-                                Inherited           = $ace.IsInherited
-                                AttackPath          = 'Can add members to gain group privileges'
-                                RiskLevel           = 'Critical'
-                                DistinguishedName   = $groupDN
-                            }
-                        }
+                foreach ($finding in $aclFindings) {
+                    $findings += [PSCustomObject]@{
+                        TargetObject      = $finding.TargetObject
+                        TargetType        = $finding.TargetType
+                        Principal         = $finding.Principal
+                        Rights            = 'GenericAll'
+                        Inherited         = $finding.Inherited
+                        AttackPath        = 'Can add members to gain group privileges'
+                        RiskLevel         = 'Critical'
+                        DistinguishedName = $finding.DistinguishedName
                     }
-                } catch {
-                    # Skip objects we can't access
                 }
             }
         }
@@ -169,43 +112,24 @@
         # Check Domain Controllers
         if ($Data.DomainControllers) {
             foreach ($dc in $Data.DomainControllers) {
-                try {
-                    $dcDN = $dc.DistinguishedName
-                    if (-not $dcDN) { continue }
+                if (-not $dc.DistinguishedName) { continue }
 
-                    $adsiObj = [ADSI]"LDAP://$dcDN"
-                    $acl = $adsiObj.ObjectSecurity
+                $aclFindings = Test-ADScoutACLViolation -DistinguishedName $dc.DistinguishedName `
+                    -RightsToCheck 'GenericAll' `
+                    -TargetName $dc.Name `
+                    -TargetType 'Domain Controller'
 
-                    foreach ($ace in $acl.Access) {
-                        if ($ace.AccessControlType -ne 'Allow') { continue }
-                        if ($ace.ActiveDirectoryRights -notmatch 'GenericAll') { continue }
-
-                        $identity = $ace.IdentityReference.Value
-
-                        # Check if legitimate
-                        $isLegitimate = $false
-                        foreach ($legit in $legitimatePrincipals) {
-                            if ($identity -like "*$legit*") {
-                                $isLegitimate = $true
-                                break
-                            }
-                        }
-
-                        if (-not $isLegitimate) {
-                            $findings += [PSCustomObject]@{
-                                TargetObject        = $dc.Name
-                                TargetType          = 'Domain Controller'
-                                Principal           = $identity
-                                Rights              = 'GenericAll'
-                                Inherited           = $ace.IsInherited
-                                AttackPath          = 'Can configure RBCD for DC takeover, or modify DC object'
-                                RiskLevel           = 'Critical'
-                                DistinguishedName   = $dcDN
-                            }
-                        }
+                foreach ($finding in $aclFindings) {
+                    $findings += [PSCustomObject]@{
+                        TargetObject      = $finding.TargetObject
+                        TargetType        = $finding.TargetType
+                        Principal         = $finding.Principal
+                        Rights            = 'GenericAll'
+                        Inherited         = $finding.Inherited
+                        AttackPath        = 'Can configure RBCD for DC takeover, or modify DC object'
+                        RiskLevel         = 'Critical'
+                        DistinguishedName = $finding.DistinguishedName
                     }
-                } catch {
-                    # Skip objects we can't access
                 }
             }
         }

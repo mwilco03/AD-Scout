@@ -48,30 +48,12 @@
 
         $findings = @()
 
-        # Default ACL entries on AdminSDHolder
-        # These are the ONLY principals that should have access
-        $defaultTrustees = @(
-            'Domain Admins'
-            'Enterprise Admins'
-            'Administrators'
-            'SYSTEM'
-            'Account Operators'
-            'Backup Operators'
+        # AdminSDHolder-specific additional trustees beyond standard admin principals
+        $adminSDHolderTrustees = @(
             'Print Operators'
             'Server Operators'
             'Replicator'
             'ENTERPRISE DOMAIN CONTROLLERS'
-        )
-
-        # These SIDs are always legitimate
-        $legitimateSIDs = @(
-            'S-1-5-32-544'      # Administrators
-            'S-1-5-18'          # SYSTEM
-            'S-1-5-9'           # Enterprise DCs
-            'S-1-5-32-548'      # Account Operators
-            'S-1-5-32-551'      # Backup Operators
-            'S-1-5-32-550'      # Print Operators
-            'S-1-5-32-549'      # Server Operators
         )
 
         try {
@@ -82,72 +64,37 @@
             }
 
             $adminSDHolderDN = "CN=AdminSDHolder,CN=System,$domainDN"
-            $adminSDHolder = [ADSI]"LDAP://$adminSDHolderDN"
-            $acl = $adminSDHolder.ObjectSecurity
 
-            foreach ($ace in $acl.Access) {
-                if ($ace.AccessControlType -ne 'Allow') { continue }
+            # Use centralized ACL validation with AdminSDHolder-specific trustees
+            $aclFindings = Test-ADScoutACLViolation -DistinguishedName $adminSDHolderDN `
+                -RightsToCheck '.*' `
+                -TargetName 'AdminSDHolder' `
+                -TargetType 'Container' `
+                -AdditionalLegitPrincipals $adminSDHolderTrustees
 
-                $identity = $ace.IdentityReference.Value
-                $rights = $ace.ActiveDirectoryRights.ToString()
+            foreach ($finding in $aclFindings) {
+                # Categorize dangerous rights
+                $dangerousRights = @()
+                if ($finding.AllRights -match 'GenericAll') { $dangerousRights += 'Full Control' }
+                if ($finding.AllRights -match 'WriteDacl') { $dangerousRights += 'Can modify permissions' }
+                if ($finding.AllRights -match 'WriteOwner') { $dangerousRights += 'Can take ownership' }
+                if ($finding.AllRights -match 'GenericWrite') { $dangerousRights += 'Can modify attributes' }
+                if ($finding.AllRights -match 'WriteProperty') { $dangerousRights += 'Can modify properties' }
 
-                # Check if this is a default trustee
-                $isDefault = $false
-
-                foreach ($defaultTrustee in $defaultTrustees) {
-                    if ($identity -like "*\$defaultTrustee" -or $identity -eq $defaultTrustee -or $identity -like "*$defaultTrustee") {
-                        $isDefault = $true
-                        break
-                    }
-                }
-
-                # Check by SID
-                if (-not $isDefault) {
-                    try {
-                        $ntAccount = New-Object System.Security.Principal.NTAccount($identity)
-                        $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
-
-                        foreach ($legitSID in $legitimateSIDs) {
-                            if ($sid -eq $legitSID -or $sid -like "$legitSID*") {
-                                $isDefault = $true
-                                break
-                            }
-                        }
-
-                        # Check domain-relative privileged SIDs
-                        if ($sid -match '-512$' -or $sid -match '-519$') {
-                            $isDefault = $true
-                        }
-                    } catch {
-                        # Can't resolve SID, assume suspicious
-                    }
-                }
-
-                if (-not $isDefault) {
-                    # This is a non-default ACE - potential backdoor
-                    $dangerousRights = @()
-                    if ($rights -match 'GenericAll') { $dangerousRights += 'Full Control' }
-                    if ($rights -match 'WriteDacl') { $dangerousRights += 'Can modify permissions' }
-                    if ($rights -match 'WriteOwner') { $dangerousRights += 'Can take ownership' }
-                    if ($rights -match 'GenericWrite') { $dangerousRights += 'Can modify attributes' }
-                    if ($rights -match 'WriteProperty') { $dangerousRights += 'Can modify properties' }
-
-                    $findings += [PSCustomObject]@{
-                        Trustee             = $identity
-                        Rights              = $rights
-                        DangerousRights     = ($dangerousRights -join ', ')
-                        Inherited           = $ace.IsInherited
-                        Persistence         = 'ACL will propagate to all protected accounts every 60 minutes'
-                        AffectedAccounts    = 'Domain Admins, Enterprise Admins, Administrators, krbtgt, etc.'
-                        RiskLevel           = 'Critical'
-                        AttackType          = 'AdminSDHolder Persistence'
-                        DistinguishedName   = $adminSDHolderDN
-                    }
+                $findings += [PSCustomObject]@{
+                    Trustee           = $finding.Principal
+                    Rights            = $finding.AllRights
+                    DangerousRights   = ($dangerousRights -join ', ')
+                    Inherited         = $finding.Inherited
+                    Persistence       = 'ACL will propagate to all protected accounts every 60 minutes'
+                    AffectedAccounts  = 'Domain Admins, Enterprise Admins, Administrators, krbtgt, etc.'
+                    RiskLevel         = 'Critical'
+                    AttackType        = 'AdminSDHolder Persistence'
+                    DistinguishedName = $adminSDHolderDN
                 }
             }
 
             # Also check if SDProp interval has been modified (should be 60 minutes)
-            $dsHeuristics = $null
             try {
                 $configNC = ([ADSI]"LDAP://RootDSE").configurationNamingContext
                 $dsService = [ADSI]"LDAP://CN=Directory Service,CN=Windows NT,CN=Services,$configNC"
@@ -156,27 +103,32 @@
                 if ($dsHeuristics -and $dsHeuristics.Length -ge 16) {
                     $sdPropInterval = $dsHeuristics.Substring(15, 1)
                     if ($sdPropInterval -ne '0') {
-                        # Custom SDProp interval
-                        $intervalMinutes = [int]$sdPropInterval * 60
+                        # Custom SDProp interval - get value from constants if available
+                        $defaultInterval = if ($script:ADScoutConstants) {
+                            $script:ADScoutConstants.TimeThresholds.SDPropIntervalMinutes
+                        } else { 60 }
+                        $intervalMinutes = [int]$sdPropInterval * $defaultInterval
+
                         $findings += [PSCustomObject]@{
-                            Trustee             = 'SDProp Configuration'
-                            Rights              = 'N/A'
-                            DangerousRights     = "Custom interval: $intervalMinutes minutes"
-                            Inherited           = $false
-                            Persistence         = 'SDProp interval modified from default 60 minutes'
-                            AffectedAccounts    = 'All protected accounts'
-                            RiskLevel           = 'High'
-                            AttackType          = 'SDProp Interval Modification'
-                            DistinguishedName   = $dsService.distinguishedName
+                            Trustee           = 'SDProp Configuration'
+                            Rights            = 'N/A'
+                            DangerousRights   = "Custom interval: $intervalMinutes minutes"
+                            Inherited         = $false
+                            Persistence       = 'SDProp interval modified from default 60 minutes'
+                            AffectedAccounts  = 'All protected accounts'
+                            RiskLevel         = 'High'
+                            AttackType        = 'SDProp Interval Modification'
+                            DistinguishedName = $dsService.distinguishedName
                         }
                     }
                 }
-            } catch {
-                # Can't check SDProp interval
             }
-
-        } catch {
-            # Can't access AdminSDHolder
+            catch {
+                Write-Verbose "Could not check SDProp interval: $_"
+            }
+        }
+        catch {
+            Write-Verbose "Could not access AdminSDHolder: $_"
         }
 
         return $findings

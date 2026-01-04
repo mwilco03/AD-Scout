@@ -119,41 +119,16 @@ function Get-ADScoutGroupDataFallback {
     $groups = @()
 
     try {
-        # Build LDAP path
-        $ldapPath = if ($Server) {
-            "LDAP://$Server"
-        } elseif ($Domain) {
-            $domainDN = ($Domain.Split('.') | ForEach-Object { "DC=$_" }) -join ','
-            "LDAP://$domainDN"
-        } else {
-            "LDAP://RootDSE"
-        }
-
-        # Create DirectoryEntry
-        $directoryEntry = if ($Credential) {
-            New-Object System.DirectoryServices.DirectoryEntry($ldapPath, $Credential.UserName, $Credential.GetNetworkCredential().Password)
-        } else {
-            New-Object System.DirectoryServices.DirectoryEntry($ldapPath)
-        }
-
-        if ($ldapPath -eq "LDAP://RootDSE") {
-            $defaultNC = $directoryEntry.Properties["defaultNamingContext"][0]
-            $directoryEntry = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$defaultNC")
-        }
-
-        $searcher = New-Object System.DirectoryServices.DirectorySearcher($directoryEntry)
-        $searcher.Filter = "(objectClass=group)"
-        $searcher.PageSize = 1000
-
+        # Use centralized DirectorySearcher helper
         $propertiesToLoad = @(
             'name', 'samaccountname', 'distinguishedname', 'grouptype',
             'member', 'memberof', 'whencreated', 'whenchanged',
             'description', 'admincount', 'objectsid'
         )
 
-        foreach ($prop in $propertiesToLoad) {
-            [void]$searcher.PropertiesToLoad.Add($prop)
-        }
+        $searcher = New-ADScoutDirectorySearcher -Domain $Domain -Server $Server -Credential $Credential `
+            -Filter '(objectClass=group)' `
+            -Properties $propertiesToLoad
 
         $results = $searcher.FindAll()
 

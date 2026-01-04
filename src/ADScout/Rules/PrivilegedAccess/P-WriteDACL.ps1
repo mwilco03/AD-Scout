@@ -48,24 +48,7 @@
 
         $findings = @()
 
-        # Define legitimate privileged principals
-        $legitimatePrincipals = @(
-            'Domain Admins'
-            'Enterprise Admins'
-            'Administrators'
-            'SYSTEM'
-            'Account Operators'
-            'CREATOR OWNER'
-        )
-
-        $legitimateSIDPatterns = @(
-            'S-1-5-32-544'      # Administrators
-            'S-1-5-18'          # SYSTEM
-            'S-1-5-9'           # Enterprise DCs
-            'S-1-3-0'           # Creator Owner
-        )
-
-        # Sensitive objects to check
+        # Build list of sensitive objects to check
         $sensitiveObjects = @()
 
         try {
@@ -95,85 +78,46 @@
             # Check privileged users
             if ($Data.Users) {
                 $privUsers = $Data.Users | Where-Object { $_.AdminCount -eq 1 }
-                foreach ($user in $privUsers | Select-Object -First 10) {  # Limit to avoid performance issues
+                foreach ($user in $privUsers | Select-Object -First 10) {  # Limit for performance
                     $sensitiveObjects += @{ DN = $user.DistinguishedName; Name = $user.SamAccountName; Type = 'Privileged User' }
                 }
             }
-
-        } catch {
-            # Error building sensitive objects list
+        }
+        catch {
+            Write-Verbose "Error building sensitive objects list: $_"
         }
 
-        # Check ACLs on sensitive objects
+        # Check ACLs on sensitive objects using centralized helper
         foreach ($obj in $sensitiveObjects) {
-            try {
-                $adsiObj = [ADSI]"LDAP://$($obj.DN)"
-                $acl = $adsiObj.ObjectSecurity
+            if (-not $obj.DN) { continue }
 
-                foreach ($ace in $acl.Access) {
-                    if ($ace.AccessControlType -ne 'Allow') { continue }
+            $aclFindings = Test-ADScoutACLViolation -DistinguishedName $obj.DN `
+                -RightsToCheck 'WriteDacl|GenericAll|GenericWrite' `
+                -TargetName $obj.Name `
+                -TargetType $obj.Type
 
-                    $rights = $ace.ActiveDirectoryRights.ToString()
-
-                    # Check for WriteDACL or permissions that include it
-                    if ($rights -notmatch 'WriteDacl|GenericAll|GenericWrite') { continue }
-
-                    $identity = $ace.IdentityReference.Value
-
-                    # Check if principal is legitimate
-                    $isLegitimate = $false
-
-                    foreach ($legitPrincipal in $legitimatePrincipals) {
-                        if ($identity -like "*\$legitPrincipal" -or $identity -eq $legitPrincipal) {
-                            $isLegitimate = $true
-                            break
-                        }
-                    }
-
-                    if (-not $isLegitimate) {
-                        try {
-                            $ntAccount = New-Object System.Security.Principal.NTAccount($identity)
-                            $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
-
-                            foreach ($legitSID in $legitimateSIDPatterns) {
-                                if ($sid -eq $legitSID -or $sid -like "$legitSID*") {
-                                    $isLegitimate = $true
-                                    break
-                                }
-                            }
-
-                            # Check domain-relative privileged SIDs
-                            if ($sid -match '-512$' -or $sid -match '-519$' -or $sid -match '-518$') {
-                                $isLegitimate = $true
-                            }
-                        } catch {
-                            # If we can't resolve, assume not legitimate
-                        }
-                    }
-
-                    if (-not $isLegitimate) {
-                        $specificRight = if ($rights -match 'WriteDacl' -and $rights -notmatch 'GenericAll') {
-                            'WriteDACL'
-                        } elseif ($rights -match 'GenericAll') {
-                            'GenericAll (includes WriteDACL)'
-                        } else {
-                            $rights
-                        }
-
-                        $findings += [PSCustomObject]@{
-                            TargetObject        = $obj.Name
-                            TargetType          = $obj.Type
-                            Principal           = $identity
-                            Rights              = $specificRight
-                            Inherited           = $ace.IsInherited
-                            AttackPath          = 'Can grant self full control, then DCSync, reset passwords, etc.'
-                            RiskLevel           = 'Critical'
-                            DistinguishedName   = $obj.DN
-                        }
-                    }
+            foreach ($finding in $aclFindings) {
+                # Determine specific right for clarity
+                $specificRight = if ($finding.Rights -match 'GenericAll') {
+                    'GenericAll (includes WriteDACL)'
                 }
-            } catch {
-                # Skip objects we can't access
+                elseif ($finding.Rights -match 'WriteDacl') {
+                    'WriteDACL'
+                }
+                else {
+                    $finding.Rights
+                }
+
+                $findings += [PSCustomObject]@{
+                    TargetObject      = $finding.TargetObject
+                    TargetType        = $finding.TargetType
+                    Principal         = $finding.Principal
+                    Rights            = $specificRight
+                    Inherited         = $finding.Inherited
+                    AttackPath        = 'Can grant self full control, then DCSync, reset passwords, etc.'
+                    RiskLevel         = 'Critical'
+                    DistinguishedName = $finding.DistinguishedName
+                }
             }
         }
 

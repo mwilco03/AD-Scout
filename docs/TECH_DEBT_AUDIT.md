@@ -16,16 +16,18 @@
 | **P0** | Add RequiredModules | ✅ **DONE** | `38d9980` |
 | **P1** | Extract fingerprint helper | ✅ **DONE** | `38d9980` |
 | **P1** | Create config path helper | ✅ **DONE** | `38d9980` |
-| **P1** | Add missing Set-ADScoutConfig params | ✅ **DONE** | Pending |
-| **P1** | Create tests for new helpers | ✅ **DONE** | Pending |
+| **P1** | Add missing Set-ADScoutConfig params | ✅ **DONE** | `12c1d18` |
+| **P1** | Create tests for new helpers | ✅ **DONE** | `12c1d18` |
 | **P2** | Externalize SID mappings | ✅ **DONE** | `38d9980` |
 | **P2** | Create centralized constants | ✅ **DONE** | `38d9980` |
-| **P1** | Extract ACL validation module | ⏳ Pending | - |
-| **P1** | Extract DirectorySearcher utility | ⏳ Pending | - |
+| **P1** | Extract ACL validation module | ✅ **DONE** | Pending |
+| **P1** | Extract DirectorySearcher utility | ✅ **DONE** | Pending |
+| **P1** | Update rules to use ACL helper | ✅ **DONE** | Pending |
+| **P1** | Update collectors to use DS helper | ✅ **DONE** | Pending |
 | **P2** | Split Export-ADScoutReport | ⏳ Pending | - |
 | **P2** | Create SMB scanner utilities | ⏳ Pending | - |
 
-**Progress:** 9/13 items completed (69%)
+**Progress:** 13/15 items completed (87%)
 
 ---
 

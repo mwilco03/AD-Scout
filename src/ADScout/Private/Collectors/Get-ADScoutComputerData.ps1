@@ -129,32 +129,7 @@ function Get-ADScoutComputerDataFallback {
     $computers = @()
 
     try {
-        # Build LDAP path
-        $ldapPath = if ($Server) {
-            "LDAP://$Server"
-        } elseif ($Domain) {
-            $domainDN = ($Domain.Split('.') | ForEach-Object { "DC=$_" }) -join ','
-            "LDAP://$domainDN"
-        } else {
-            "LDAP://RootDSE"
-        }
-
-        # Create DirectoryEntry
-        $directoryEntry = if ($Credential) {
-            New-Object System.DirectoryServices.DirectoryEntry($ldapPath, $Credential.UserName, $Credential.GetNetworkCredential().Password)
-        } else {
-            New-Object System.DirectoryServices.DirectoryEntry($ldapPath)
-        }
-
-        if ($ldapPath -eq "LDAP://RootDSE") {
-            $defaultNC = $directoryEntry.Properties["defaultNamingContext"][0]
-            $directoryEntry = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$defaultNC")
-        }
-
-        $searcher = New-Object System.DirectoryServices.DirectorySearcher($directoryEntry)
-        $searcher.Filter = "(objectClass=computer)"
-        $searcher.PageSize = 1000
-
+        # Use centralized DirectorySearcher helper
         $propertiesToLoad = @(
             'name', 'samaccountname', 'distinguishedname', 'dnshostname',
             'operatingsystem', 'operatingsystemversion', 'lastlogontimestamp',
@@ -163,20 +138,18 @@ function Get-ADScoutComputerDataFallback {
             'msds-allowedtodelegateto'
         )
 
-        foreach ($prop in $propertiesToLoad) {
-            [void]$searcher.PropertiesToLoad.Add($prop)
-        }
+        $searcher = New-ADScoutDirectorySearcher -Domain $Domain -Server $Server -Credential $Credential `
+            -Filter '(objectClass=computer)' `
+            -Properties $propertiesToLoad
 
         $results = $searcher.FindAll()
 
         foreach ($result in $results) {
             $props = $result.Properties
 
-            # Decode UserAccountControl for delegation flags
+            # Decode UserAccountControl using centralized helper
             $uac = if ($props['useraccountcontrol']) { $props['useraccountcontrol'][0] } else { 0 }
-            $enabled = -not ($uac -band 0x0002)  # ACCOUNTDISABLE
-            $trustedForDelegation = [bool]($uac -band 0x80000)  # TRUSTED_FOR_DELEGATION
-            $trustedToAuthForDelegation = [bool]($uac -band 0x1000000)  # TRUSTED_TO_AUTH_FOR_DELEGATION
+            $uacInfo = ConvertFrom-ADScoutUAC -UAC $uac
 
             # Convert timestamps
             $lastLogon = if ($props['lastlogontimestamp']) {
@@ -192,15 +165,15 @@ function Get-ADScoutComputerDataFallback {
                 SamAccountName             = if ($props['samaccountname']) { $props['samaccountname'][0] } else { $null }
                 DistinguishedName          = if ($props['distinguishedname']) { $props['distinguishedname'][0] } else { $null }
                 DNSHostName                = if ($props['dnshostname']) { $props['dnshostname'][0] } else { $null }
-                Enabled                    = $enabled
+                Enabled                    = $uacInfo.Enabled
                 OperatingSystem            = if ($props['operatingsystem']) { $props['operatingsystem'][0] } else { $null }
                 OperatingSystemVersion     = if ($props['operatingsystemversion']) { $props['operatingsystemversion'][0] } else { $null }
                 LastLogonDate              = $lastLogon
                 PasswordLastSet            = $pwdLastSet
                 WhenCreated                = if ($props['whencreated']) { $props['whencreated'][0] } else { $null }
                 ServicePrincipalNames      = @($props['serviceprincipalname'])
-                TrustedForDelegation       = $trustedForDelegation
-                TrustedToAuthForDelegation = $trustedToAuthForDelegation
+                TrustedForDelegation       = $uacInfo.TrustedForDelegation
+                TrustedToAuthForDelegation = $uacInfo.TrustedToAuthForDelegation
                 AllowedToDelegateTo        = @($props['msds-allowedtodelegateto'])
                 Description                = if ($props['description']) { $props['description'][0] } else { $null }
                 MemberOf                   = @($props['memberof'])

@@ -184,40 +184,8 @@ function Get-ADScoutUserDataFallback {
 
     Write-Verbose "Using DirectorySearcher fallback"
 
-    # Build LDAP path
-    if ($Server) {
-        $ldapPath = "LDAP://$Server"
-    }
-    elseif ($Domain) {
-        $ldapPath = "LDAP://$Domain"
-    }
-    else {
-        $ldapPath = "LDAP://RootDSE"
-        $rootDse = [ADSI]$ldapPath
-        $ldapPath = "LDAP://$($rootDse.defaultNamingContext)"
-    }
-
-    if ($SearchBase) {
-        $ldapPath = "LDAP://$SearchBase"
-    }
-
     try {
-        if ($Credential) {
-            $directoryEntry = New-Object DirectoryServices.DirectoryEntry(
-                $ldapPath,
-                $Credential.UserName,
-                $Credential.GetNetworkCredential().Password
-            )
-        }
-        else {
-            $directoryEntry = [ADSI]$ldapPath
-        }
-
-        $searcher = New-Object DirectoryServices.DirectorySearcher($directoryEntry)
-        $searcher.Filter = '(&(objectCategory=person)(objectClass=user))'
-        $searcher.PageSize = 1000
-
-        # Add properties to load
+        # Use centralized DirectorySearcher helper
         $ldapProperties = @(
             'samaccountname', 'distinguishedname', 'userprincipalname',
             'displayname', 'useraccountcontrol', 'pwdlastset',
@@ -231,30 +199,28 @@ function Get-ADScoutUserDataFallback {
             'msds-keycredentiallink'
         )
 
-        foreach ($prop in $ldapProperties) {
-            [void]$searcher.PropertiesToLoad.Add($prop)
-        }
+        $searcher = New-ADScoutDirectorySearcher -Domain $Domain -Server $Server -Credential $Credential `
+            -SearchBase $SearchBase `
+            -Filter '(&(objectCategory=person)(objectClass=user))' `
+            -Properties $ldapProperties
 
         $results = $searcher.FindAll()
 
         $users = foreach ($result in $results) {
             $props = $result.Properties
 
-            # Decode UserAccountControl flags
+            # Decode UserAccountControl flags using centralized helper
             $uac = [int]$props['useraccountcontrol'][0]
-            $enabled = -not ($uac -band 0x2)
-            $pwdNeverExpires = [bool]($uac -band 0x10000)
-            $pwdNotRequired = [bool]($uac -band 0x20)
-            $trustedForDelegation = [bool]($uac -band 0x80000)
+            $uacInfo = ConvertFrom-ADScoutUAC -UAC $uac
 
             [PSCustomObject]@{
                 SamAccountName           = [string]$props['samaccountname'][0]
                 DistinguishedName        = [string]$props['distinguishedname'][0]
                 UserPrincipalName        = [string]$props['userprincipalname'][0]
                 DisplayName              = [string]$props['displayname'][0]
-                Enabled                  = $enabled
-                PasswordNeverExpires     = $pwdNeverExpires
-                PasswordNotRequired      = $pwdNotRequired
+                Enabled                  = $uacInfo.Enabled
+                PasswordNeverExpires     = $uacInfo.PasswordNeverExpires
+                PasswordNotRequired      = $uacInfo.PasswordNotRequired
                 PasswordLastSet          = if ($props['pwdlastset'][0]) {
                     [DateTime]::FromFileTime([Int64]$props['pwdlastset'][0])
                 } else { $null }
@@ -269,8 +235,8 @@ function Get-ADScoutUserDataFallback {
                 UserAccountControl       = $uac
                 ServicePrincipalNames    = @($props['serviceprincipalname'])
                 AllowedToDelegateTo      = @($props['msds-allowedtodelegateto'])
-                TrustedForDelegation     = $trustedForDelegation
-                TrustedToAuthForDelegation = [bool]($uac -band 0x1000000)
+                TrustedForDelegation     = $uacInfo.TrustedForDelegation
+                TrustedToAuthForDelegation = $uacInfo.TrustedToAuthForDelegation
                 Description              = [string]$props['description'][0]
                 SIDHistory               = @($props['sidhistory'])
                 PrimaryGroupID           = $props['primarygroupid'][0]
