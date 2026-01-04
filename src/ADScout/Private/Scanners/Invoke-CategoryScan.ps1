@@ -68,7 +68,7 @@ function Invoke-CategoryScan {
                 }
 
                 # Evaluate the rule
-                $finding = Invoke-RuleEvaluation -Rule $rule -Data $data -Domain $Domain
+                $finding = Invoke-RuleEvaluation -Rule $rule -ADData $data -Domain $Domain
 
                 if ($null -ne $finding) {
                     $findings.Add($finding)
