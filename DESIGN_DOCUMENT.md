@@ -387,7 +387,6 @@ The `[adsisearcher]` approach works on **any domain-joined machine** with standa
 
 - Historical baseline storage for trend analysis
 - Event log integration (optional module)
-- Machine learning anomaly scoring
 
 ---
 

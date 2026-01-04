@@ -117,6 +117,20 @@ jobs:
               'Set-ADScoutConfig'
               'Get-ADScoutConfig'
               'Show-ADScoutDashboard'
+              # SIEM Integrations
+              'Export-ADScoutElasticsearch'
+              'Export-ADScoutSplunk'
+              'Export-ADScoutSentinel'
+              # Engagement Management
+              'New-ADScoutEngagement'
+              'Get-ADScoutEngagement'
+              'Set-ADScoutEngagement'
+              'Remove-ADScoutEngagement'
+              # Exception Management
+              'New-ADScoutException'
+              'Get-ADScoutException'
+              'Set-ADScoutException'
+              'Remove-ADScoutException'
           )
 
           foreach ($cmd in $expectedCommands) {

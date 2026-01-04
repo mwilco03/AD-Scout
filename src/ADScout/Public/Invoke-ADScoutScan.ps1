@@ -39,6 +39,19 @@ function Invoke-ADScoutScan {
     .PARAMETER SkipCache
         Force fresh data collection, ignoring cached data.
 
+    .PARAMETER Incremental
+        Perform an incremental scan, only checking objects that have changed
+        since the last scan. Uses USN (Update Sequence Number) or whenChanged
+        timestamps to detect modifications. Requires a previous scan watermark.
+
+    .PARAMETER BaselinePath
+        Path to a previous scan session to use as baseline for incremental
+        scanning. If not specified, uses the most recent session.
+
+    .PARAMETER EngagementId
+        Engagement ID for scoped incremental scanning. Uses watermarks stored
+        within the engagement's session history.
+
     .EXAMPLE
         Invoke-ADScoutScan
         Runs all rules against the current domain.
@@ -54,6 +67,15 @@ function Invoke-ADScoutScan {
     .EXAMPLE
         Invoke-ADScoutScan -RuleId "S-PwdNeverExpires", "P-AdminCount"
         Runs only the specified rules.
+
+    .EXAMPLE
+        Invoke-ADScoutScan -Incremental
+        Performs an incremental scan, only evaluating objects changed since
+        the last scan.
+
+    .EXAMPLE
+        Invoke-ADScoutScan -Incremental -EngagementId 'Q1-2024-Audit'
+        Performs an incremental scan within a specific engagement context.
 
     .OUTPUTS
         ADScoutResult[]
@@ -91,12 +113,67 @@ function Invoke-ADScoutScan {
         [int]$ThrottleLimit = [Environment]::ProcessorCount,
 
         [Parameter()]
-        [switch]$SkipCache
+        [switch]$SkipCache,
+
+        [Parameter()]
+        [Alias('Differential')]
+        [switch]$Incremental,
+
+        [Parameter()]
+        [string]$BaselinePath,
+
+        [Parameter()]
+        [string]$EngagementId
     )
 
     begin {
         Write-Verbose "Starting AD-Scout scan"
         $startTime = Get-Date
+
+        # Initialize session for disk persistence
+        $sessionParams = @{}
+        if ($EngagementId) { $sessionParams.EngagementId = $EngagementId }
+        $script:CurrentSession = Get-ADScoutSessionPath @sessionParams
+
+        # Incremental scan setup
+        $script:IncrementalMode = $false
+        $script:Watermark = $null
+        $script:BaselineResults = @()
+        $script:ChangedObjectDNs = @()
+
+        if ($Incremental) {
+            Write-Verbose "Checking incremental scan availability..."
+
+            $incrementalCheck = Test-ADScoutIncrementalAvailable -Domain $Domain -EngagementId $EngagementId -SessionPath $BaselinePath
+
+            if ($incrementalCheck.Available) {
+                $script:IncrementalMode = $true
+                $script:Watermark = $incrementalCheck.Watermark
+                Write-Verbose "Incremental mode enabled. Baseline from: $($script:Watermark.ScanTime)"
+                Write-Host "Incremental scan: Using baseline from $($script:Watermark.ScanTime)" -ForegroundColor Cyan
+
+                # Load baseline results
+                $baselinePath = if ($BaselinePath) { $BaselinePath }
+                                elseif ($EngagementId) {
+                                    $latestSession = Get-ADScoutLatestSession -EngagementId $EngagementId
+                                    if ($latestSession) { $latestSession.Path }
+                                }
+                                else {
+                                    $latestSession = Get-ADScoutLatestSession
+                                    if ($latestSession) { $latestSession.Path }
+                                }
+
+                if ($baselinePath) {
+                    $baselineState = Get-ADScoutSessionState -SessionPath $baselinePath
+                    $script:BaselineResults = $baselineState.Results
+                    Write-Verbose "Loaded $($script:BaselineResults.Count) baseline results"
+                }
+            }
+            else {
+                Write-Warning "Incremental scan not available: $($incrementalCheck.Reason)"
+                Write-Warning "Falling back to full scan"
+            }
+        }
 
         # Clear cache if requested
         if ($SkipCache) {
@@ -137,16 +214,64 @@ function Invoke-ADScoutScan {
         if ($Server) { $adDataParams.Server = $Server }
         if ($Credential) { $adDataParams.Credential = $Credential }
 
-        $adData = @{
-            Users        = Get-ADScoutUserData @adDataParams
-            Computers    = Get-ADScoutComputerData @adDataParams
-            Groups       = Get-ADScoutGroupData @adDataParams
-            Trusts       = Get-ADScoutTrustData @adDataParams
-            GPOs         = Get-ADScoutGPOData @adDataParams
-            Certificates = Get-ADScoutCertificateData @adDataParams
-            Domain       = $Domain
-            Server       = $Server
-            ScanTime     = $startTime
+        # Get current highest USN for watermark
+        $currentUSN = Get-ADScoutHighestUSN -Server $Server -Domain $Domain
+        $script:HighestUSN = if ($currentUSN) { $currentUSN.HighestCommittedUSN } else { 0 }
+
+        # Incremental mode: only fetch changed objects
+        if ($script:IncrementalMode -and $script:Watermark) {
+            Write-Verbose "Incremental mode: Fetching objects changed since USN $($script:Watermark.HighestUSN)"
+            Write-Host "Fetching changed objects since last scan..." -ForegroundColor Cyan
+
+            $sinceUSN = [long]$script:Watermark.HighestUSN
+            $sinceTime = [datetime]$script:Watermark.ScanTime
+
+            # Get changed objects for each type
+            $changedUsers = Get-ADScoutChangedObjects -ObjectType 'User' -SinceUSN $sinceUSN -SinceTime $sinceTime @adDataParams
+            $changedComputers = Get-ADScoutChangedObjects -ObjectType 'Computer' -SinceUSN $sinceUSN -SinceTime $sinceTime @adDataParams
+            $changedGroups = Get-ADScoutChangedObjects -ObjectType 'Group' -SinceUSN $sinceUSN -SinceTime $sinceTime @adDataParams
+
+            # Track changed DNs for result merging
+            $script:ChangedObjectDNs = @(
+                $changedUsers.Objects | ForEach-Object { $_.distinguishedname }
+                $changedComputers.Objects | ForEach-Object { $_.distinguishedname }
+                $changedGroups.Objects | ForEach-Object { $_.distinguishedname }
+            ) | Where-Object { $_ }
+
+            $totalChanged = $changedUsers.Count + $changedComputers.Count + $changedGroups.Count
+            Write-Host "Found $totalChanged changed objects (Users: $($changedUsers.Count), Computers: $($changedComputers.Count), Groups: $($changedGroups.Count))" -ForegroundColor Cyan
+
+            # For incremental, we still need full data but mark what changed
+            $adData = @{
+                Users        = Get-ADScoutUserData @adDataParams
+                Computers    = Get-ADScoutComputerData @adDataParams
+                Groups       = Get-ADScoutGroupData @adDataParams
+                Trusts       = Get-ADScoutTrustData @adDataParams
+                GPOs         = Get-ADScoutGPOData @adDataParams
+                Certificates = Get-ADScoutCertificateData @adDataParams
+                Domain       = $Domain
+                Server       = $Server
+                ScanTime     = $startTime
+                IncrementalMode = $true
+                ChangedDNs   = $script:ChangedObjectDNs
+                BaselineUSN  = $sinceUSN
+                CurrentUSN   = $script:HighestUSN
+            }
+        }
+        else {
+            # Full scan mode
+            $adData = @{
+                Users        = Get-ADScoutUserData @adDataParams
+                Computers    = Get-ADScoutComputerData @adDataParams
+                Groups       = Get-ADScoutGroupData @adDataParams
+                Trusts       = Get-ADScoutTrustData @adDataParams
+                GPOs         = Get-ADScoutGPOData @adDataParams
+                Certificates = Get-ADScoutCertificateData @adDataParams
+                Domain       = $Domain
+                Server       = $Server
+                ScanTime     = $startTime
+                IncrementalMode = $false
+            }
         }
 
         Write-Verbose "AD data collection complete"
@@ -266,10 +391,57 @@ function Invoke-ADScoutScan {
         $endTime = Get-Date
         $duration = $endTime - $startTime
 
+        # Merge with baseline if incremental mode
+        $finalResults = $results
+        if ($script:IncrementalMode -and $script:BaselineResults.Count -gt 0) {
+            Write-Verbose "Merging incremental results with baseline..."
+
+            $finalResults = Merge-ADScoutIncrementalResults `
+                -BaselineResults $script:BaselineResults `
+                -IncrementalResults $results `
+                -ChangedObjectDNs $script:ChangedObjectDNs
+
+            # Generate incremental summary
+            $incrementalSummary = Get-ADScoutIncrementalSummary `
+                -BaselineResults $script:BaselineResults `
+                -CurrentResults $finalResults `
+                -Watermark $script:Watermark
+
+            Write-Host "`nIncremental Scan Summary:" -ForegroundColor Cyan
+            Write-Host "  Baseline: $($incrementalSummary.BaselineDate)" -ForegroundColor Gray
+            Write-Host "  Score Change: $($incrementalSummary.BaselineTotalScore) -> $($incrementalSummary.CurrentTotalScore) ($($incrementalSummary.ScoreChange))" -ForegroundColor $(if ($incrementalSummary.ScoreChange -lt 0) { 'Green' } elseif ($incrementalSummary.ScoreChange -gt 0) { 'Red' } else { 'Gray' })
+            Write-Host "  New Findings: $($incrementalSummary.NewFindingCount)" -ForegroundColor $(if ($incrementalSummary.NewFindingCount -gt 0) { 'Yellow' } else { 'Gray' })
+            Write-Host "  Resolved: $($incrementalSummary.ResolvedFindingCount)" -ForegroundColor $(if ($incrementalSummary.ResolvedFindingCount -gt 0) { 'Green' } else { 'Gray' })
+            Write-Host "  Changed: $($incrementalSummary.ChangedFindingCount)" -ForegroundColor Gray
+        }
+
         Write-Verbose "Scan completed in $($duration.TotalSeconds) seconds"
-        Write-Verbose "Total findings: $($results.Count) rules with issues"
+        Write-Verbose "Total findings: $($finalResults.Count) rules with issues"
+
+        # Save watermark for future incremental scans
+        if ($script:CurrentSession) {
+            $domainName = if ($Domain) { $Domain } else {
+                try { [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name } catch { 'Unknown' }
+            }
+
+            Save-ADScoutScanWatermark `
+                -SessionPath $script:CurrentSession.Path `
+                -Domain $domainName `
+                -ScanTime $startTime `
+                -HighestUSN $script:HighestUSN `
+                -ObjectCount ($adData.Users.Count + $adData.Computers.Count + $adData.Groups.Count) `
+                -ScanType $(if ($script:IncrementalMode) { 'Incremental' } else { 'Full' })
+
+            # Save results to session for disk persistence
+            Save-ADScoutSessionState `
+                -SessionPath $script:CurrentSession.Path `
+                -Results $finalResults `
+                -Status 'Completed'
+
+            Write-Verbose "Session saved to: $($script:CurrentSession.Path)"
+        }
 
         # Return results
-        $results
+        $finalResults
     }
 }

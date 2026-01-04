@@ -23,6 +23,15 @@
         'Get-ADScoutRemediation'
         'Show-ADScoutDashboard'
 
+        # SIEM Integrations
+        'Export-ADScoutElasticsearch'
+        'New-ADScoutElasticsearchIndex'
+        'Export-ADScoutSplunk'
+        'Test-ADScoutSplunkConnection'
+        'Export-ADScoutSentinel'
+        'New-ADScoutSentinelAnalyticsRule'
+        'Test-ADScoutSentinelConnection'
+
         # Configuration
         'Set-ADScoutConfig'
         'Get-ADScoutConfig'
@@ -40,6 +49,23 @@
         # Scan history / trend tracking
         'Save-ADScoutScanHistory'
         'Get-ADScoutScanHistory'
+
+        # Engagement Management
+        'New-ADScoutEngagement'
+        'Get-ADScoutEngagement'
+        'Set-ADScoutEngagement'
+        'Remove-ADScoutEngagement'
+        'Invoke-ADScoutEngagementScan'
+        'Get-ADScoutEngagementScans'
+
+        # Exception Management
+        'New-ADScoutException'
+        'Get-ADScoutException'
+        'Set-ADScoutException'
+        'Remove-ADScoutException'
+        'Test-ADScoutException'
+        'Invoke-ADScoutExceptionCleanup'
+        'Get-ADScoutExceptionReport'
 
         # CSV helpers
         'ConvertFrom-ADScoutCSV'
