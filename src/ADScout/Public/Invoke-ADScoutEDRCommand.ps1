@@ -113,16 +113,21 @@ function Invoke-ADScoutEDRCommand {
         [switch]$AsJob,
 
         [Parameter()]
-        [switch]$Raw
+        [switch]$Raw,
+
+        [Parameter()]
+        [string]$Session
     )
 
     begin {
         # Verify EDR connection
-        if (-not (Test-ADScoutEDRConnection)) {
+        $targetSession = if ($Session) { $Session } else { $script:ADScoutEDRActiveSession }
+
+        if (-not (Test-ADScoutEDRConnection -Name $targetSession)) {
             throw "Not connected to an EDR platform. Use Connect-ADScoutEDR first."
         }
 
-        $provider = Get-ADScoutEDRProvider -Active
+        $provider = $script:ADScoutEDRSessions[$targetSession].Provider
         $allTargets = [System.Collections.Generic.List[string]]::new()
 
         # Get template if specified
@@ -291,6 +296,9 @@ function Get-ADScoutEDRHost {
     .PARAMETER Detailed
         Return full host details (slower).
 
+    .PARAMETER Session
+        Named session to use. If not specified, uses the active session.
+
     .EXAMPLE
         Get-ADScoutEDRHost -Filter @{Platform = 'Windows'; Online = $true}
 
@@ -302,9 +310,9 @@ function Get-ADScoutEDRHost {
         Gets hosts that appear to be domain controllers.
 
     .EXAMPLE
-        Get-ADScoutEDRHost -Filter @{Hostname = 'DC*'}
+        Get-ADScoutEDRHost -Filter @{Hostname = 'DC*'} -Session 'MSSP-ClientA'
 
-        Gets hosts with hostnames starting with 'DC'.
+        Gets hosts with hostnames starting with 'DC' from a specific session.
     #>
     [CmdletBinding()]
     param(
@@ -315,14 +323,19 @@ function Get-ADScoutEDRHost {
         [switch]$DomainControllers,
 
         [Parameter()]
-        [switch]$Detailed
+        [switch]$Detailed,
+
+        [Parameter()]
+        [string]$Session
     )
 
-    if (-not (Test-ADScoutEDRConnection)) {
+    $targetSession = if ($Session) { $Session } else { $script:ADScoutEDRActiveSession }
+
+    if (-not (Test-ADScoutEDRConnection -Name $targetSession)) {
         throw "Not connected to an EDR platform. Use Connect-ADScoutEDR first."
     }
 
-    $provider = Get-ADScoutEDRProvider -Active
+    $provider = $script:ADScoutEDRSessions[$targetSession].Provider
 
     if ($DomainControllers) {
         # Use provider-specific method if available
@@ -352,15 +365,33 @@ function Get-ADScoutEDRCapabilities {
         Returns information about what the connected EDR platform supports,
         such as parallel execution, script length limits, and supported platforms.
 
+    .PARAMETER Session
+        Named session to query. If not specified, uses the active session.
+
     .EXAMPLE
         Get-ADScoutEDRCapabilities
 
         Returns capability information for the active EDR provider.
+
+    .EXAMPLE
+        Get-ADScoutEDRCapabilities -Session 'MSSP-ClientA'
+
+        Returns capabilities for a specific session.
     #>
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter()]
+        [string]$Session
+    )
 
-    $provider = Get-ADScoutEDRProvider -Active
+    $targetSession = if ($Session) { $Session } else { $script:ADScoutEDRActiveSession }
+
+    if (-not $targetSession -or -not $script:ADScoutEDRSessions -or -not $script:ADScoutEDRSessions.ContainsKey($targetSession)) {
+        Write-Warning "No active EDR session. Use Connect-ADScoutEDR first."
+        return $null
+    }
+
+    $provider = $script:ADScoutEDRSessions[$targetSession].Provider
 
     if (-not $provider) {
         Write-Warning "No active EDR provider. Use Connect-ADScoutEDR first."
@@ -371,6 +402,7 @@ function Get-ADScoutEDRCapabilities {
 
     [PSCustomObject]@{
         PSTypeName                 = 'ADScout.EDR.Capabilities'
+        SessionName                = $targetSession
         ProviderName               = $provider.Name
         ProviderVersion            = $provider.Version
         SupportsParallelExecution  = $capabilities.SupportsParallelExecution

@@ -45,6 +45,8 @@
         'Connect-ADScoutEDR'
         'Disconnect-ADScoutEDR'
         'Test-ADScoutEDRConnection'
+        'Switch-ADScoutEDRConnection'
+        'Get-ADScoutEDRConnection'
         'Invoke-ADScoutEDRCommand'
         'Get-ADScoutEDRHost'
         'Get-ADScoutEDRCapabilities'
