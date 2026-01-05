@@ -146,8 +146,35 @@ class EDRProviderBase {
 $script:EDRProviders = @{}
 $script:ActiveEDRProvider = $null
 
-# SECURITY: Global read-only enforcement
-$script:ADScoutEDRReadOnlyMode = $true
+# SECURITY: Read-only mode is enforced ONLY when multiple sessions are active
+# Single session = full access (your own environment)
+# Multiple sessions = read-only (MSSP multi-tenant safety)
+
+function Test-ADScoutEDRMultiSessionMode {
+    <#
+    .SYNOPSIS
+        Checks if multiple EDR sessions are active (MSSP multi-tenant mode).
+
+    .DESCRIPTION
+        Returns $true if more than one EDR session is connected, indicating
+        MSSP/multi-tenant operation where read-only safety should be enforced.
+
+        Single session = unrestricted (direct access equivalent)
+        Multiple sessions = read-only enforced (protect client environments)
+
+    .OUTPUTS
+        Boolean. $true if in multi-session mode, $false otherwise.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    if (-not $script:ADScoutEDRSessions) {
+        return $false
+    }
+
+    return ($script:ADScoutEDRSessions.Count -gt 1)
+}
 
 function Register-ADScoutEDRProvider {
     <#

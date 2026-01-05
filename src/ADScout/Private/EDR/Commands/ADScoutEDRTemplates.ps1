@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Pre-canned READ-ONLY execution templates for AD queries via EDR platforms.
+    Pre-canned execution templates for AD queries via EDR platforms.
 
 .DESCRIPTION
     Provides ready-to-use command templates for common Active Directory
@@ -10,9 +10,13 @@
     through EDR platforms like CrowdStrike Falcon, allowing security
     professionals to gather AD data without direct admin access.
 
-    SECURITY: All templates in this file MUST be read-only reconnaissance
-    operations. Write operations are NOT permitted through EDR execution.
-    Every template must have IsWriteOperation = $false.
+    SECURITY - Multi-Session Mode:
+    When multiple EDR sessions are active (MSSP multi-tenant scenarios),
+    only templates marked with IsWriteOperation = $false can be executed.
+    This protects client environments from accidental modifications.
+
+    Single session = All templates allowed (full access)
+    Multi-session  = Read-only templates only (IsWriteOperation = $false)
 
 .NOTES
     Author: AD-Scout Contributors
@@ -28,8 +32,12 @@ function Register-ADScoutEDRTemplate {
         Registers a pre-canned EDR execution template.
 
     .DESCRIPTION
-        SECURITY: All templates must be marked with IsWriteOperation = $false.
-        Templates marked as write operations will be rejected.
+        Registers a template for EDR execution. Templates must declare whether
+        they perform write operations via the IsWriteOperation flag.
+
+        SECURITY NOTE:
+        - Single-session mode: All templates allowed (full access)
+        - Multi-session mode: Only templates with IsWriteOperation = $false are allowed
 
     .PARAMETER Template
         Hashtable containing template definition. Must include:
@@ -37,7 +45,7 @@ function Register-ADScoutEDRTemplate {
         - Name: Human-readable name
         - Category: Template category
         - ScriptBlock: PowerShell code to execute
-        - IsWriteOperation: Must be $false (read-only enforcement)
+        - IsWriteOperation: $true if template modifies system state, $false for read-only
     #>
     [CmdletBinding()]
     param(
@@ -53,13 +61,13 @@ function Register-ADScoutEDRTemplate {
         }
     }
 
-    # SECURITY: Reject write operation templates
+    # Log warning for write operations (they'll only work in single-session mode)
     if ($Template.IsWriteOperation -eq $true) {
-        throw "SECURITY: Cannot register template '$($Template.Id)' - write operations are not permitted. EDR execution is read-only."
+        Write-Verbose "Template '$($Template.Id)' is marked as write operation - only available in single-session mode"
     }
 
     $script:EDRTemplates[$Template.Id] = $Template
-    Write-Verbose "Registered EDR Template: $($Template.Id) (read-only)"
+    Write-Verbose "Registered EDR Template: $($Template.Id)"
 }
 
 function Get-ADScoutEDRTemplate {

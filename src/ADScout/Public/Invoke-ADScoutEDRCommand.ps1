@@ -1,26 +1,36 @@
 function Invoke-ADScoutEDRCommand {
     <#
     .SYNOPSIS
-        Executes read-only reconnaissance templates on remote endpoints through the connected EDR platform.
+        Executes commands or templates on remote endpoints through the connected EDR platform.
 
     .DESCRIPTION
-        SECURITY: This function is READ-ONLY by design. Only pre-approved AD-Scout
-        templates can be executed. Arbitrary script execution is not supported to
-        prevent unintended changes to production systems.
-
-        Enables execution of pre-canned AD-Scout reconnaissance templates on remote
+        Enables execution of PowerShell commands or pre-canned AD-Scout templates on remote
         endpoints via EDR platforms like CrowdStrike Falcon or Microsoft Defender
         for Endpoint. This is designed for security professionals who need to gather
         Active Directory and endpoint security data without direct administrative
         access to target systems.
 
-        Use Get-ADScoutEDRTemplate to see all available read-only templates.
+        SECURITY NOTE - Multi-Session Mode:
+        When multiple EDR sessions are active (MSSP multi-tenant scenarios), this
+        function is LOCKED DOWN to template-only, read-only operations to prevent
+        accidental changes to client environments. In single-session mode (your own
+        environment), full functionality is available.
+
+        Single session  = Full access (ScriptBlock, Command, Template)
+        Multi-session   = Template-only, read-only (safety for MSSP)
 
     .PARAMETER Template
         Name of a pre-canned AD-Scout template to execute. Use Get-ADScoutEDRTemplate
         to see available templates. Templates are predefined scripts for common
-        security reconnaissance tasks. This is the ONLY way to execute commands -
-        arbitrary script execution is not supported for security reasons.
+        security reconnaissance tasks.
+
+    .PARAMETER ScriptBlock
+        Custom PowerShell scriptblock to execute on target hosts.
+        NOT AVAILABLE in multi-session mode (MSSP safety).
+
+    .PARAMETER Command
+        PowerShell command string to execute on target hosts.
+        NOT AVAILABLE in multi-session mode (MSSP safety).
 
     .PARAMETER TargetHost
         Target hostname(s) or device ID(s) to execute the command on.
@@ -55,46 +65,41 @@ function Invoke-ADScoutEDRCommand {
         Executes the domain info template on a domain controller.
 
     .EXAMPLE
-        Invoke-ADScoutEDRCommand -Template 'AD-PrivilegedGroups' -TargetHost 'DC01', 'DC02'
+        Invoke-ADScoutEDRCommand -ScriptBlock { Get-ADUser -Filter * } -TargetHost 'DC01'
 
-        Gets privileged group membership from multiple domain controllers.
-
-    .EXAMPLE
-        Invoke-ADScoutEDRCommand -Template 'AD-SPNAccounts' -Filter @{Platform = 'Windows'; OU = '*Domain Controllers*'}
-
-        Finds Kerberoastable accounts via domain controllers selected by OU.
+        Executes a custom scriptblock (single-session mode only).
 
     .EXAMPLE
-        $results = Invoke-ADScoutEDRCommand -Template 'AD-StaleComputers' -TargetHost 'DC01' -TemplateParameters @{DaysInactive = 180}
+        Invoke-ADScoutEDRCommand -Command 'Get-Service | Where-Object Status -eq Running' -TargetHost 'Server01'
 
-        Finds computers inactive for 180 days.
-
-    .EXAMPLE
-        Get-ADScoutEDRHost -Filter @{Platform = 'Windows'; Online = $true} |
-            Select-Object -First 5 |
-            Invoke-ADScoutEDRCommand -Template 'EP-LocalAdmins'
-
-        Gets local administrators from the first 5 online Windows hosts.
+        Executes a command string (single-session mode only).
 
     .EXAMPLE
-        # Multi-tenant MSSP usage
+        # Multi-tenant MSSP usage (template-only enforced)
+        Connect-ADScoutEDR -Provider PSFalcon -Name 'ClientA' -ClientId $idA -ClientSecret $secretA
+        Connect-ADScoutEDR -Provider PSFalcon -Name 'ClientB' -ClientId $idB -ClientSecret $secretB
+        # Now in multi-session mode - only templates allowed
         Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo' -TargetHost 'DC01' -Session 'ClientA'
-
-        Executes against a specific MSSP tenant session.
 
     .OUTPUTS
         PSCustomObject with results per host, or raw JSON if -Raw specified.
 
     .NOTES
-        SECURITY: Arbitrary script execution is NOT supported. Only pre-approved
-        templates can be executed to prevent unintended system modifications.
-
         Requires an active EDR connection. Use Connect-ADScoutEDR first.
+
+        SECURITY: When multiple sessions are connected, only pre-approved templates
+        can be executed to prevent unintended changes to client environments.
     #>
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Template')]
     param(
-        [Parameter(Mandatory, Position = 0)]
+        [Parameter(Mandatory, ParameterSetName = 'Template', Position = 0)]
         [string]$Template,
+
+        [Parameter(Mandatory, ParameterSetName = 'ScriptBlock')]
+        [scriptblock]$ScriptBlock,
+
+        [Parameter(Mandatory, ParameterSetName = 'Command')]
+        [string]$Command,
 
         [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [Alias('Hostname', 'DeviceId', 'MachineId', 'ComputerName')]
@@ -103,7 +108,7 @@ function Invoke-ADScoutEDRCommand {
         [Parameter()]
         [hashtable]$Filter,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Template')]
         [hashtable]$TemplateParameters = @{},
 
         [Parameter()]
@@ -133,23 +138,34 @@ function Invoke-ADScoutEDRCommand {
         $provider = $script:ADScoutEDRSessions[$targetSession].Provider
         $allTargets = [System.Collections.Generic.List[string]]::new()
 
-        # Get and validate template
-        $templateDef = Get-ADScoutEDRTemplate -Name $Template
-        if (-not $templateDef) {
-            throw "Template '$Template' not found. Use Get-ADScoutEDRTemplate to see available templates."
+        # Check if we're in multi-session mode (MSSP safety)
+        $isMultiSession = Test-ADScoutEDRMultiSessionMode
+
+        # SECURITY: In multi-session mode, only templates are allowed
+        if ($isMultiSession -and $PSCmdlet.ParameterSetName -ne 'Template') {
+            throw "SECURITY: Multiple EDR sessions are active (MSSP mode). Only -Template execution is allowed to protect client environments. Disconnect other sessions to use -ScriptBlock or -Command."
         }
 
-        # SECURITY: Validate template is read-only before execution
-        # This is defense-in-depth - templates should already be safe, but we verify
-        try {
-            $null = Test-ADScoutEDRCommandSafety -TemplateName $Template
-        }
-        catch {
-            Write-Error "SECURITY: Template validation failed - $_"
-            throw
-        }
+        # Get template if using template mode
+        $templateDef = $null
+        if ($PSCmdlet.ParameterSetName -eq 'Template') {
+            $templateDef = Get-ADScoutEDRTemplate -Name $Template
+            if (-not $templateDef) {
+                throw "Template '$Template' not found. Use Get-ADScoutEDRTemplate to see available templates."
+            }
 
-        Write-Verbose "Template '$Template' passed safety validation"
+            # In multi-session mode, validate template is read-only
+            if ($isMultiSession) {
+                try {
+                    $null = Test-ADScoutEDRCommandSafety -TemplateName $Template
+                }
+                catch {
+                    Write-Error "SECURITY: Template validation failed - $_"
+                    throw
+                }
+                Write-Verbose "Template '$Template' passed safety validation (multi-session mode)"
+            }
+        }
     }
 
     process {
@@ -181,38 +197,52 @@ function Invoke-ADScoutEDRCommand {
             return
         }
 
-        Write-Verbose "Executing template '$Template' on $($allTargets.Count) target(s)..."
+        Write-Verbose "Executing on $($allTargets.Count) target(s)..."
 
-        # Build command from template only (SECURITY: no arbitrary script execution)
-        $expandedCommand = $templateDef.ScriptBlock
-        foreach ($key in $TemplateParameters.Keys) {
-            $expandedCommand = $expandedCommand -replace "\`$\{$key\}", $TemplateParameters[$key]
-            $expandedCommand = $expandedCommand -replace "\`$$key", $TemplateParameters[$key]
-        }
-        $commandToExecute = $expandedCommand
+        # Build command based on parameter set
+        $commandToExecute = switch ($PSCmdlet.ParameterSetName) {
+            'Template' {
+                $expandedCommand = $templateDef.ScriptBlock
+                foreach ($key in $TemplateParameters.Keys) {
+                    $expandedCommand = $expandedCommand -replace "\`$\{$key\}", $TemplateParameters[$key]
+                    $expandedCommand = $expandedCommand -replace "\`$$key", $TemplateParameters[$key]
+                }
 
-        # SECURITY: Final validation of expanded command
-        # Ensure parameter substitution didn't introduce dangerous patterns
-        try {
-            $null = Test-ADScoutEDRCommandSafety -Command $commandToExecute
-        }
-        catch {
-            Write-Error "SECURITY: Expanded command validation failed - $_"
-            throw
+                # In multi-session mode, validate expanded command for safety
+                if ($isMultiSession) {
+                    try {
+                        $null = Test-ADScoutEDRCommandSafety -Command $expandedCommand
+                    }
+                    catch {
+                        Write-Error "SECURITY: Expanded command validation failed - $_"
+                        throw
+                    }
+                }
+
+                $expandedCommand
+            }
+            'ScriptBlock' {
+                # Single-session mode only (checked in begin block)
+                $ScriptBlock.ToString()
+            }
+            'Command' {
+                # Single-session mode only (checked in begin block)
+                $Command
+            }
         }
 
-        # Build options from template
+        # Build options
         $options = @{
-            RequiresElevation = $templateDef.RequiresElevation
+            RequiresElevation = if ($templateDef) { $templateDef.RequiresElevation } else { $false }
             QueueOffline      = $QueueOffline.IsPresent
-            TemplateName      = $Template
-            ReadOnly          = $true  # SECURITY: Always read-only
+            TemplateName      = if ($Template) { $Template } else { $null }
+            ReadOnly          = $isMultiSession  # Read-only only in multi-session mode
         }
 
         if ($Timeout) {
             $options.Timeout = $Timeout
         }
-        elseif ($templateDef.Timeout) {
+        elseif ($templateDef -and $templateDef.Timeout) {
             $options.Timeout = $templateDef.Timeout
         }
 
