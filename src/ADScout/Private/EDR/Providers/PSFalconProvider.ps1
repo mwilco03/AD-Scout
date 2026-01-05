@@ -9,6 +9,21 @@
     PSFalcon PowerShell module. Enables remote command execution on endpoints
     through the Falcon Real Time Response (RTR) API.
 
+    API RATE LIMITS & CONSTRAINTS:
+    ==============================
+    - Max concurrent RTR sessions: 500 per CID (across all users)
+    - Max batch session init: 10,000 hosts per request
+    - RTR session timeout: 10 minutes idle, extendable
+    - API rate limit: 6,000 requests per minute per CID
+    - RunScript command timeout: 600 seconds (10 minutes)
+    - Script size limit: 4MB per script
+    - Batch commands: Up to 10,000 hosts per batch
+
+    MSSP CONSIDERATIONS:
+    - Each child CID has independent session/rate limits
+    - Parent CID operations count against parent limits
+    - Use MemberCid parameter for child tenant operations
+
 .NOTES
     Author: AD-Scout Contributors
     License: MIT
@@ -33,11 +48,17 @@ class PSFalconProvider : EDRProviderBase {
     hidden [hashtable]$ActiveSessions = @{}
     hidden [int]$SessionTimeoutMinutes = 10
 
+    # API Rate Limits (documented for reference)
+    static [int]$MaxConcurrentSessions = 500        # Per CID
+    static [int]$MaxBatchHosts = 10000              # Per batch request
+    static [int]$ApiRateLimitPerMinute = 6000       # Per CID
+    static [int]$MaxScriptSizeBytes = 4194304       # 4MB
+
     PSFalconProvider() {
         $this.Name = 'PSFalcon'
         $this.Version = '1.0.0'
         $this.Description = 'CrowdStrike Falcon EDR provider using PSFalcon module'
-        $this.MaxConcurrentCommands = 100
+        $this.MaxConcurrentCommands = 500  # Aligned with CrowdStrike limit
         $this.CommandTimeoutSeconds = 600
     }
 

@@ -1143,3 +1143,361 @@ try {
 $result | ConvertTo-Json -Depth 10 -Compress
 '@
 }
+
+# =============================================================================
+# Comprehensive Collection Templates
+# =============================================================================
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'AD-FullRecon'
+    Name               = 'Full AD Security Reconnaissance'
+    Category           = 'Collection'
+    Description        = 'Comprehensive AD security collection - domain info, trusts, privileged accounts, delegation, Kerberos risks, and password policy in one execution.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
+    RequiresElevation  = $false
+    Timeout            = 600  # 10 minutes for full collection
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    CollectionType = 'AD-FullRecon'
+    Domain = $null
+    Trusts = @()
+    PrivilegedGroups = @()
+    AdminSDHolderObjects = @()
+    SPNAccounts = @()
+    ASREPRoastable = @()
+    UnconstrainedDelegation = @()
+    ConstrainedDelegation = @()
+    PasswordPolicy = $null
+    PasswordNeverExpires = @()
+    Errors = @()
+}
+
+try {
+    # Domain Information
+    try {
+        $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+        $result.Domain = @{
+            Name = $domain.Name
+            Forest = $domain.Forest.Name
+            DomainMode = $domain.DomainMode.ToString()
+            ForestMode = $domain.Forest.ForestMode.ToString()
+            DomainControllers = @($domain.DomainControllers | ForEach-Object {
+                @{ Name = $_.Name; IPAddress = $_.IPAddress; SiteName = $_.SiteName }
+            })
+            PDCEmulator = $domain.PdcRoleOwner.Name
+        }
+    } catch { $result.Errors += "Domain: $($_.Exception.Message)" }
+
+    # Trusts
+    try {
+        $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+        foreach ($trust in $domain.GetAllTrustRelationships()) {
+            $result.Trusts += @{
+                SourceName = $trust.SourceName
+                TargetName = $trust.TargetName
+                TrustType = $trust.TrustType.ToString()
+                TrustDirection = $trust.TrustDirection.ToString()
+            }
+        }
+    } catch { $result.Errors += "Trusts: $($_.Exception.Message)" }
+
+    $searcher = New-Object System.DirectoryServices.DirectorySearcher
+    $searcher.PageSize = 1000
+    $domainSID = ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -split '-')[0..6] -join '-'
+
+    # Privileged Groups
+    try {
+        $privilegedSIDs = @('S-1-5-32-544', 'S-1-5-32-548', 'S-1-5-32-549', "$domainSID-512", "$domainSID-518", "$domainSID-519")
+        $searcher.Filter = "(objectClass=group)"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('name', 'member', 'objectSid', 'distinguishedName'))
+        foreach ($group in $searcher.FindAll()) {
+            $groupSID = (New-Object System.Security.Principal.SecurityIdentifier($group.Properties['objectsid'][0], 0)).Value
+            if ($privilegedSIDs -contains $groupSID) {
+                $result.PrivilegedGroups += @{
+                    Name = $group.Properties['name'][0]
+                    SID = $groupSID
+                    MemberCount = @($group.Properties['member']).Count
+                    Members = @($group.Properties['member'])
+                }
+            }
+        }
+    } catch { $result.Errors += "PrivilegedGroups: $($_.Exception.Message)" }
+
+    # AdminSDHolder
+    try {
+        $searcher.Filter = "(&(adminCount=1)(|(objectClass=user)(objectClass=group)))"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'objectClass', 'distinguishedName'))
+        foreach ($obj in $searcher.FindAll()) {
+            $result.AdminSDHolderObjects += @{
+                SamAccountName = $obj.Properties['samaccountname'][0]
+                ObjectClass = $obj.Properties['objectclass'] -join ','
+                DistinguishedName = $obj.Properties['distinguishedname'][0]
+            }
+        }
+    } catch { $result.Errors += "AdminSDHolder: $($_.Exception.Message)" }
+
+    # SPN Accounts (Kerberoastable)
+    try {
+        $searcher.Filter = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer)))"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'servicePrincipalName', 'pwdLastSet', 'adminCount'))
+        foreach ($user in $searcher.FindAll()) {
+            $pwdLastSet = $null
+            if ($user.Properties['pwdlastset'][0]) {
+                $pwdLastSet = [DateTime]::FromFileTime($user.Properties['pwdlastset'][0]).ToString('o')
+            }
+            $result.SPNAccounts += @{
+                SamAccountName = $user.Properties['samaccountname'][0]
+                SPNs = @($user.Properties['serviceprincipalname'])
+                PasswordLastSet = $pwdLastSet
+                AdminCount = $user.Properties['admincount'][0]
+            }
+        }
+    } catch { $result.Errors += "SPNAccounts: $($_.Exception.Message)" }
+
+    # AS-REP Roastable
+    try {
+        $DONT_REQUIRE_PREAUTH = 4194304
+        $searcher.Filter = "(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=$DONT_REQUIRE_PREAUTH))"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'distinguishedName'))
+        foreach ($user in $searcher.FindAll()) {
+            $result.ASREPRoastable += @{
+                SamAccountName = $user.Properties['samaccountname'][0]
+                DistinguishedName = $user.Properties['distinguishedname'][0]
+            }
+        }
+    } catch { $result.Errors += "ASREPRoastable: $($_.Exception.Message)" }
+
+    # Unconstrained Delegation
+    try {
+        $TRUSTED_FOR_DELEGATION = 524288
+        $searcher.Filter = "(userAccountControl:1.2.840.113556.1.4.803:=$TRUSTED_FOR_DELEGATION)"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'objectClass', 'dNSHostName'))
+        foreach ($obj in $searcher.FindAll()) {
+            $result.UnconstrainedDelegation += @{
+                SamAccountName = $obj.Properties['samaccountname'][0]
+                ObjectClass = $obj.Properties['objectclass'] -join ','
+                DNSHostName = $obj.Properties['dnshostname'][0]
+            }
+        }
+    } catch { $result.Errors += "UnconstrainedDelegation: $($_.Exception.Message)" }
+
+    # Constrained Delegation
+    try {
+        $searcher.Filter = "(msDS-AllowedToDelegateTo=*)"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'msDS-AllowedToDelegateTo'))
+        foreach ($obj in $searcher.FindAll()) {
+            $result.ConstrainedDelegation += @{
+                SamAccountName = $obj.Properties['samaccountname'][0]
+                AllowedToDelegateTo = @($obj.Properties['msds-allowedtodelegateto'])
+            }
+        }
+    } catch { $result.Errors += "ConstrainedDelegation: $($_.Exception.Message)" }
+
+    # Password Policy
+    try {
+        $searcher.Filter = "(objectClass=domain)"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('minPwdLength', 'maxPwdAge', 'pwdHistoryLength', 'lockoutThreshold'))
+        $domainObj = $searcher.FindOne()
+        if ($domainObj) {
+            $result.PasswordPolicy = @{
+                MinPasswordLength = $domainObj.Properties['minpwdlength'][0]
+                MaxPasswordAge = $domainObj.Properties['maxpwdage'][0]
+                PasswordHistoryLength = $domainObj.Properties['pwdhistorylength'][0]
+                LockoutThreshold = $domainObj.Properties['lockoutthreshold'][0]
+            }
+        }
+    } catch { $result.Errors += "PasswordPolicy: $($_.Exception.Message)" }
+
+    # Password Never Expires (limited to first 100)
+    try {
+        $DONT_EXPIRE_PASSWORD = 65536
+        $searcher.Filter = "(&(objectClass=user)(!(objectClass=computer))(userAccountControl:1.2.840.113556.1.4.803:=$DONT_EXPIRE_PASSWORD))"
+        $searcher.PropertiesToLoad.Clear()
+        $searcher.PropertiesToLoad.AddRange(@('sAMAccountName', 'adminCount'))
+        $searcher.SizeLimit = 100
+        foreach ($user in $searcher.FindAll()) {
+            $result.PasswordNeverExpires += @{
+                SamAccountName = $user.Properties['samaccountname'][0]
+                AdminCount = $user.Properties['admincount'][0]
+            }
+        }
+    } catch { $result.Errors += "PasswordNeverExpires: $($_.Exception.Message)" }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-FullRecon'
+    Name               = 'Full Endpoint Security Reconnaissance'
+    Category           = 'Collection'
+    Description        = 'Comprehensive endpoint security baseline - OS info, security config, local admins, AV status, firewall, scheduled tasks in one execution.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
+    RequiresElevation  = $true
+    Timeout            = 300  # 5 minutes
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    CollectionType = 'EP-FullRecon'
+    OSInfo = $null
+    LocalAdministrators = @()
+    Firewall = @()
+    Antivirus = @()
+    SecurityServices = @()
+    LSAProtection = $null
+    CredentialGuard = $null
+    ScheduledTasks = @()
+    RecentLogons = @()
+    Errors = @()
+}
+
+try {
+    # OS Information
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $cs = Get-CimInstance Win32_ComputerSystem
+        $result.OSInfo = @{
+            Caption = $os.Caption
+            Version = $os.Version
+            BuildNumber = $os.BuildNumber
+            OSArchitecture = $os.OSArchitecture
+            LastBootUpTime = $os.LastBootUpTime.ToString('o')
+            Domain = $cs.Domain
+            DomainRole = $cs.DomainRole
+            TotalPhysicalMemoryGB = [math]::Round($cs.TotalPhysicalMemory / 1GB, 2)
+        }
+    } catch { $result.Errors += "OSInfo: $($_.Exception.Message)" }
+
+    # Local Administrators
+    try {
+        $admins = net localgroup Administrators 2>$null
+        $inMembers = $false
+        foreach ($line in $admins) {
+            if ($line -match '^-+$') { $inMembers = $true; continue }
+            if ($inMembers -and $line -match '\S' -and $line -notmatch 'command completed') {
+                $result.LocalAdministrators += $line.Trim()
+            }
+        }
+    } catch { $result.Errors += "LocalAdmins: $($_.Exception.Message)" }
+
+    # Firewall Status
+    try {
+        $fw = Get-NetFirewallProfile
+        $result.Firewall = @($fw | ForEach-Object {
+            @{
+                Profile = $_.Name
+                Enabled = $_.Enabled
+                DefaultInboundAction = $_.DefaultInboundAction.ToString()
+                DefaultOutboundAction = $_.DefaultOutboundAction.ToString()
+            }
+        })
+    } catch { $result.Errors += "Firewall: $($_.Exception.Message)" }
+
+    # Antivirus
+    try {
+        $av = Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct
+        $result.Antivirus = @($av | ForEach-Object {
+            @{
+                DisplayName = $_.displayName
+                ProductState = $_.productState
+                PathToSignedProductExe = $_.pathToSignedProductExe
+            }
+        })
+    } catch { $result.Errors += "Antivirus: $($_.Exception.Message)" }
+
+    # Security Services
+    try {
+        $secServices = @('WinDefend', 'Sense', 'CSFalconService', 'CbDefense', 'McAfeeFramework', 'SepMasterService')
+        foreach ($svc in $secServices) {
+            $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
+            if ($service) {
+                $result.SecurityServices += @{
+                    Name = $service.Name
+                    DisplayName = $service.DisplayName
+                    Status = $service.Status.ToString()
+                    StartType = $service.StartType.ToString()
+                }
+            }
+        }
+    } catch { $result.Errors += "SecurityServices: $($_.Exception.Message)" }
+
+    # LSA Protection
+    try {
+        $lsa = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'RunAsPPL' -ErrorAction SilentlyContinue
+        $result.LSAProtection = ($lsa.RunAsPPL -eq 1)
+    } catch { $result.Errors += "LSAProtection: $($_.Exception.Message)" }
+
+    # Credential Guard
+    try {
+        $cg = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard -ErrorAction SilentlyContinue
+        if ($cg) {
+            $result.CredentialGuard = @{
+                VBSRunning = ($cg.VirtualizationBasedSecurityStatus -eq 2)
+                CredentialGuardRunning = ($cg.SecurityServicesRunning -contains 1)
+            }
+        }
+    } catch { $result.Errors += "CredentialGuard: $($_.Exception.Message)" }
+
+    # Scheduled Tasks (non-Microsoft, enabled only)
+    try {
+        $tasks = Get-ScheduledTask | Where-Object {
+            $_.State -ne 'Disabled' -and
+            $_.TaskPath -notmatch '^\\Microsoft\\'
+        } | Select-Object -First 50
+        foreach ($task in $tasks) {
+            $result.ScheduledTasks += @{
+                TaskName = $task.TaskName
+                TaskPath = $task.TaskPath
+                State = $task.State.ToString()
+                Author = $task.Author
+                Actions = @($task.Actions | ForEach-Object { $_.Execute })
+            }
+        }
+    } catch { $result.Errors += "ScheduledTasks: $($_.Exception.Message)" }
+
+    # Recent Interactive Logons (from Security log, last 24h)
+    try {
+        $yesterday = (Get-Date).AddDays(-1)
+        $logons = Get-WinEvent -FilterHashtable @{
+            LogName = 'Security'
+            Id = 4624
+            StartTime = $yesterday
+        } -MaxEvents 20 -ErrorAction SilentlyContinue | Where-Object {
+            $_.Properties[8].Value -in @(2, 10, 11)  # Interactive, RemoteInteractive, CachedInteractive
+        }
+        foreach ($event in $logons) {
+            $result.RecentLogons += @{
+                TimeCreated = $event.TimeCreated.ToString('o')
+                TargetUserName = $event.Properties[5].Value
+                TargetDomainName = $event.Properties[6].Value
+                LogonType = $event.Properties[8].Value
+                IpAddress = $event.Properties[18].Value
+            }
+        }
+    } catch { $result.Errors += "RecentLogons: $($_.Exception.Message)" }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}

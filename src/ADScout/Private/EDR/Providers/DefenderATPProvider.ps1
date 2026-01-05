@@ -8,6 +8,29 @@
     Implements the EDR provider interface for Microsoft Defender for Endpoint
     using the Microsoft Graph Security API and MDE Live Response API.
 
+    API RATE LIMITS & CONSTRAINTS:
+    ==============================
+    - Max concurrent Live Response sessions: 25 per tenant (HARD LIMIT)
+    - Max pending Live Response sessions: 10 additional in queue
+    - Session timeout: 30 minutes idle
+    - API rate limit: 100 requests per minute per app
+    - Script execution timeout: 10 minutes
+    - Script size limit: 8MB per script file
+    - Max response size: 3MB per command output
+    - Machine isolation: Cannot run Live Response on isolated machines
+
+    IMPORTANT LIMITATIONS:
+    - Only 25 simultaneous connections to different machines
+    - Commands queue if > 25 sessions active (up to 10 queued)
+    - Sessions automatically terminate after 30 min idle
+    - E5 or MDE P2 license required for Live Response
+    - Some commands require "Advanced" Live Response license
+
+    THROTTLING BEHAVIOR:
+    - HTTP 429 returned when rate limited
+    - Retry-After header indicates wait time
+    - Exponential backoff recommended
+
 .NOTES
     Author: AD-Scout Contributors
     License: MIT
@@ -28,11 +51,19 @@ class DefenderATPProvider : EDRProviderBase {
     hidden [string]$AccessToken
     hidden [datetime]$TokenExpires
 
+    # API Rate Limits (documented for reference)
+    static [int]$MaxConcurrentSessions = 25         # HARD LIMIT per tenant
+    static [int]$MaxPendingQueue = 10               # Additional queued sessions
+    static [int]$ApiRateLimitPerMinute = 100        # Per app registration
+    static [int]$SessionTimeoutMinutes = 30         # Idle timeout
+    static [int]$MaxScriptSizeBytes = 8388608       # 8MB
+    static [int]$MaxResponseSizeBytes = 3145728     # 3MB
+
     DefenderATPProvider() {
         $this.Name = 'DefenderATP'
         $this.Version = '1.0.0'
         $this.Description = 'Microsoft Defender for Endpoint provider'
-        $this.MaxConcurrentCommands = 25
+        $this.MaxConcurrentCommands = 25  # Aligned with MDE hard limit
         $this.CommandTimeoutSeconds = 600
     }
 
