@@ -28,8 +28,46 @@ foreach ($file in @($Private + $Public)) {
     }
 }
 
-# Export public functions
-Export-ModuleMember -Function $Public.BaseName
+# Build list of functions to export
+# Include all functions from Public/*.ps1 files (by parsing their content)
+$ExportFunctions = [System.Collections.Generic.List[string]]::new()
+
+foreach ($file in $Public) {
+    try {
+        $content = Get-Content -Path $file.FullName -Raw
+        # Find all function definitions in the file
+        $matches = [regex]::Matches($content, '^\s*function\s+([A-Za-z][\w-]+)', 'Multiline')
+        foreach ($match in $matches) {
+            $funcName = $match.Groups[1].Value
+            if ($funcName -and -not $ExportFunctions.Contains($funcName)) {
+                $ExportFunctions.Add($funcName)
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Could not parse $($file.Name) for functions: $_"
+        # Fallback to basename
+        if (-not $ExportFunctions.Contains($file.BaseName)) {
+            $ExportFunctions.Add($file.BaseName)
+        }
+    }
+}
+
+# Add EDR functions defined in Private that should be public
+$EDRPublicFunctions = @(
+    'Get-ADScoutEDRProvider',
+    'Get-ADScoutEDRTemplate',
+    'Register-ADScoutEDRProvider',
+    'Test-ADScoutEDRMultiSessionMode'
+)
+foreach ($func in $EDRPublicFunctions) {
+    if (-not $ExportFunctions.Contains($func)) {
+        $ExportFunctions.Add($func)
+    }
+}
+
+# Export all collected functions
+Export-ModuleMember -Function $ExportFunctions
 
 # Module-level configuration
 $script:ADScoutConfig = @{
@@ -87,6 +125,37 @@ Register-ArgumentCompleter -CommandName Get-ADScoutRule -ParameterName Id -Scrip
                 catch { }
             }
     }
+}
+
+# EDR Template argument completer
+Register-ArgumentCompleter -CommandName Invoke-ADScoutEDRCommand -ParameterName Template -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    if ($script:EDRTemplates) {
+        $script:EDRTemplates.Values |
+            Where-Object { $_.Id -like "$wordToComplete*" -or $_.Name -like "$wordToComplete*" } |
+            ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_.Id, $_.Id, 'ParameterValue', $_.Description)
+            }
+    }
+}
+
+Register-ArgumentCompleter -CommandName Invoke-ADScoutEDRCollection -ParameterName Template -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    if ($script:EDRTemplates) {
+        $script:EDRTemplates.Values |
+            Where-Object { $_.Id -like "$wordToComplete*" -or $_.Name -like "$wordToComplete*" } |
+            ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_.Id, $_.Id, 'ParameterValue', $_.Description)
+            }
+    }
+}
+
+# EDR Provider argument completer
+Register-ArgumentCompleter -CommandName Connect-ADScoutEDR -ParameterName Provider -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    @('PSFalcon', 'DefenderATP', 'MDE', 'CarbonBlack') |
+        Where-Object { $_ -like "$wordToComplete*" } |
+        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
 
 # Initialize verbose message
