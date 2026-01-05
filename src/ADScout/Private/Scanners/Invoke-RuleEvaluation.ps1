@@ -26,7 +26,8 @@ function Invoke-RuleEvaluation {
 
         [Parameter(Mandatory)]
         [AllowNull()]
-        $Data,
+        [Alias('Data')]
+        $ADData,
 
         [Parameter()]
         [string]$Domain
@@ -39,13 +40,28 @@ function Invoke-RuleEvaluation {
     process {
         try {
             # Skip if no data provided
-            if ($null -eq $Data) {
+            if ($null -eq $ADData) {
                 Write-ADScoutLog -Message "No data provided for rule $($Rule.Id), skipping" -Level Verbose
                 return $null
             }
 
-            # Execute the detection scriptblock (normalized to ScriptBlock property)
-            $detectResult = & $Rule.ScriptBlock -Data $Data -Domain $Domain
+            # Check prerequisites if defined
+            if ($Rule.Prerequisites) {
+                try {
+                    $prereqResult = & $Rule.Prerequisites -ADData $ADData
+                    if (-not $prereqResult) {
+                        Write-ADScoutLog -Message "Prerequisites not met for rule $($Rule.Id), skipping" -Level Verbose
+                        return $null
+                    }
+                }
+                catch {
+                    Write-ADScoutLog -Message "Prerequisite check failed for rule $($Rule.Id): $_" -Level Verbose
+                    return $null
+                }
+            }
+
+            # Execute the detection scriptblock (rules expect -ADData parameter)
+            $detectResult = & $Rule.ScriptBlock -ADData $ADData
 
             # Handle different return types
             $findings = @()

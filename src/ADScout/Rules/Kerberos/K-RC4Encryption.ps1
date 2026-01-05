@@ -99,14 +99,104 @@
             }
         }
 
-        # Check domain policy
-        try {
-            $domainPolicy = Get-ADDefaultDomainPasswordPolicy -ErrorAction SilentlyContinue
+        # Check KDC encryption policy on domain controllers
+        # The registry key controls what the KDC will actually honor
+        # HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters\SupportedEncryptionTypes
+        if ($Data.DomainControllers) {
+            foreach ($dc in $Data.DomainControllers) {
+                try {
+                    $kdcPolicy = Invoke-Command -ComputerName $dc.DNSHostName -ScriptBlock {
+                        $regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters'
+                        $defaultPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters'
 
-            # Also check GPO for Kerberos policy
-            # Network security: Configure encryption types allowed for Kerberos
-        } catch {
-            # Can't check domain policy
+                        $result = @{
+                            PolicyPath = $null
+                            SupportedEncryptionTypes = $null
+                            DefaultDomainSupportedEncTypes = $null
+                        }
+
+                        # Check GPO-configured policy
+                        if (Test-Path $regPath) {
+                            $policy = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+                            if ($policy.SupportedEncryptionTypes) {
+                                $result.PolicyPath = $regPath
+                                $result.SupportedEncryptionTypes = $policy.SupportedEncryptionTypes
+                            }
+                        }
+
+                        # Check LSA Kerberos defaults
+                        if (Test-Path $defaultPath) {
+                            $defaults = Get-ItemProperty -Path $defaultPath -ErrorAction SilentlyContinue
+                            if ($defaults.DefaultDomainSupportedEncTypes) {
+                                $result.DefaultDomainSupportedEncTypes = $defaults.DefaultDomainSupportedEncTypes
+                            }
+                        }
+
+                        return $result
+                    } -ErrorAction SilentlyContinue
+
+                    if ($kdcPolicy) {
+                        $kdcEncTypes = $kdcPolicy.SupportedEncryptionTypes ?? $kdcPolicy.DefaultDomainSupportedEncTypes
+
+                        if ($kdcEncTypes) {
+                            $kdcAllowsRC4 = ($kdcEncTypes -band $rc4Flag) -ne 0
+                            $kdcAllowsDES = ($kdcEncTypes -band 0x3) -ne 0
+                            $kdcAllowsAES = ($kdcEncTypes -band ($aes128Flag -bor $aes256Flag)) -ne 0
+
+                            if ($kdcAllowsRC4) {
+                                $riskLevel = if ($kdcAllowsDES) { 'Critical' } elseif (-not $kdcAllowsAES) { 'Critical' } else { 'High' }
+                                $findings += [PSCustomObject]@{
+                                    ObjectType          = 'KDC Policy'
+                                    SamAccountName      = $dc.Name
+                                    SPNCount            = 'N/A'
+                                    EncryptionTypes     = "0x$($kdcEncTypes.ToString('X'))"
+                                    UsesRC4             = $true
+                                    HasAES              = $kdcAllowsAES
+                                    Issue               = 'KDC policy allows RC4 Kerberos requests'
+                                    RiskLevel           = $riskLevel
+                                    Impact              = 'Attackers can request RC4 tickets for any account'
+                                    DistinguishedName   = $dc.DistinguishedName
+                                    PolicySource        = if ($kdcPolicy.SupportedEncryptionTypes) { 'GPO' } else { 'Default' }
+                                }
+                            }
+
+                            if ($kdcAllowsDES) {
+                                $findings += [PSCustomObject]@{
+                                    ObjectType          = 'KDC Policy'
+                                    SamAccountName      = $dc.Name
+                                    SPNCount            = 'N/A'
+                                    EncryptionTypes     = "0x$($kdcEncTypes.ToString('X'))"
+                                    UsesRC4             = $kdcAllowsRC4
+                                    HasAES              = $kdcAllowsAES
+                                    Issue               = 'KDC policy allows DES Kerberos requests - CRITICAL'
+                                    RiskLevel           = 'Critical'
+                                    Impact              = 'DES is cryptographically broken'
+                                    DistinguishedName   = $dc.DistinguishedName
+                                    PolicySource        = if ($kdcPolicy.SupportedEncryptionTypes) { 'GPO' } else { 'Default' }
+                                }
+                            }
+                        } else {
+                            # No explicit policy = defaults depend on domain functional level
+                            # Modern DFLs default to RC4+AES
+                            $findings += [PSCustomObject]@{
+                                ObjectType          = 'KDC Policy'
+                                SamAccountName      = $dc.Name
+                                SPNCount            = 'N/A'
+                                EncryptionTypes     = 'Not Configured'
+                                UsesRC4             = $true
+                                HasAES              = $true
+                                Issue               = 'No explicit KDC encryption policy - defaults to RC4+AES'
+                                RiskLevel           = 'Medium'
+                                Impact              = 'KDC will honor RC4 ticket requests by default'
+                                DistinguishedName   = $dc.DistinguishedName
+                                PolicySource        = 'Default (no GPO)'
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Verbose "K-RC4Encryption: Could not query KDC policy on $($dc.Name): $_"
+                }
+            }
         }
 
         # Check computer accounts (especially sensitive ones)

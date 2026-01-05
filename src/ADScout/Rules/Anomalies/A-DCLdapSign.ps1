@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'Anomalies'
     Title       = 'LDAP Signing Not Required on Domain Controllers'
-    Description = 'LDAP signing is not enforced on Domain Controllers, allowing LDAP relay attacks. Attackers can intercept and modify LDAP traffic or relay LDAP authentication to gain unauthorized access.'
+    Description = 'LDAP signing is not enforced on Domain Controllers, allowing LDAP relay attacks. Checks both DC registry configuration AND GPO enforcement to ensure consistent domain-wide protection.'
     Severity    = 'High'
     Weight      = 30
-    DataSource  = 'DomainControllers'
+    DataSource  = 'DomainControllers,GPOs'
 
     References  = @(
         @{ Title = 'LDAP Signing Requirements'; Url = 'https://learn.microsoft.com/en-us/troubleshoot/windows-server/identity/enable-ldap-signing-in-windows-server' }
@@ -32,9 +32,53 @@
         param($Data, $Domain)
 
         $findings = @()
+        $dcs = if ($Data.DomainControllers) { $Data.DomainControllers } else { $Data }
 
-        # Check each Domain Controller for LDAP signing configuration
-        foreach ($dc in $Data) {
+        # ========================================================================
+        # BELT: Check GPO enforcement for LDAP signing
+        # ========================================================================
+        $gpoEnforcesLdapSigning = $false
+
+        if ($Data.GPOs) {
+            foreach ($gpo in $Data.GPOs) {
+                try {
+                    # Check if GPO contains LDAP signing policy
+                    # This is in: Computer Configuration > Policies > Windows Settings > Security Settings
+                    #             > Local Policies > Security Options
+                    # "Domain controller: LDAP server signing requirements"
+                    $gpoPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf"
+
+                    if (Test-Path $gpoPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $gpoPath -Raw -ErrorAction SilentlyContinue
+                        # LDAPServerIntegrity = 2 means Require signing
+                        if ($content -match 'LDAPServerIntegrity\s*=\s*2') {
+                            $gpoEnforcesLdapSigning = $true
+                            break
+                        }
+                    }
+                } catch {
+                    Write-Verbose "A-DCLdapSign: Could not check GPO $($gpo.DisplayName): $_"
+                }
+            }
+        }
+
+        if (-not $gpoEnforcesLdapSigning) {
+            $findings += [PSCustomObject]@{
+                ObjectType           = 'GPO Policy'
+                DomainController     = 'Domain-wide'
+                OperatingSystem      = 'N/A'
+                LDAPServerIntegrity  = 'Not Enforced'
+                SigningStatus        = 'No GPO requires LDAP signing'
+                RiskLevel            = 'High'
+                AttackVector         = 'DC configurations may drift - no policy enforcement'
+                ConfigSource         = 'Missing GPO'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check each Domain Controller's actual configuration
+        # ========================================================================
+        foreach ($dc in $dcs) {
             $ldapSigningStatus = 'Unknown'
             $registryValue = $null
 
@@ -55,7 +99,7 @@
                         }
                         $reg.Close()
                     } catch {
-                        # Remote registry access failed, check via LDAP rootDSE
+                        # Remote registry access failed
                         $registryValue = $null
                     }
                 } else {
@@ -75,23 +119,27 @@
                 # Flag if not requiring signing (0, 1, or not configured)
                 if ($registryValue -ne 2) {
                     $findings += [PSCustomObject]@{
+                        ObjectType           = 'DC Configuration'
                         DomainController     = $dc.Name
                         OperatingSystem      = $dc.OperatingSystem
                         LDAPServerIntegrity  = $registryValue
                         SigningStatus        = $ldapSigningStatus
                         RiskLevel            = if ($registryValue -eq 0) { 'Critical' } else { 'High' }
                         AttackVector         = 'LDAP Relay attacks, credential interception'
+                        ConfigSource         = 'Registry'
                     }
                 }
             } catch {
                 # Unable to check - flag for manual review
                 $findings += [PSCustomObject]@{
+                    ObjectType           = 'DC Configuration'
                     DomainController     = $dc.Name
                     OperatingSystem      = $dc.OperatingSystem
                     LDAPServerIntegrity  = 'Unable to determine'
                     SigningStatus        = 'Requires manual verification'
                     RiskLevel            = 'Unknown'
                     AttackVector         = 'LDAP Relay attacks if not properly configured'
+                    ConfigSource         = 'Unknown'
                 }
             }
         }

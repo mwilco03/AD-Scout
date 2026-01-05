@@ -3,7 +3,7 @@
     Version     = '1.0.0'
     Category    = 'Kerberos'
     Title       = 'Kerberoastable Service Accounts'
-    Description = 'Identifies user accounts with Service Principal Names (SPNs) that are vulnerable to Kerberoasting attacks. Attackers can request TGS tickets and crack passwords offline.'
+    Description = 'Identifies user accounts with Service Principal Names (SPNs) that are vulnerable to Kerberoasting attacks. Attackers can request TGS tickets and crack passwords offline. NOTE: Even if an account only supports AES, attackers may still request RC4 tickets if the KDC allows it - see K-RC4Encryption rule for KDC policy check.'
     Severity    = 'High'
     Weight      = 35
     DataSource  = 'Users'
@@ -44,17 +44,42 @@
                     (New-TimeSpan -Start $user.PasswordLastSet -End (Get-Date)).Days
                 } else { 'Never Set' }
 
-                # Check encryption types
-                $weakEncryption = $false
-                if ($user.msDS-SupportedEncryptionTypes) {
-                    # RC4 = 0x4, DES = 0x1, 0x2
-                    if ($user.'msDS-SupportedEncryptionTypes' -band 0x7) {
-                        $weakEncryption = $true
+                # Check encryption types for Kerberoasting risk
+                # Encryption type flags:
+                # 0x01 = DES-CBC-CRC, 0x02 = DES-CBC-MD5, 0x04 = RC4-HMAC (all weak/crackable)
+                # 0x08 = AES128-CTS-HMAC-SHA1-96, 0x10 = AES256-CTS-HMAC-SHA1-96 (strong)
+                #
+                # IMPORTANT: Even if AES is enabled, attackers can request RC4 tickets
+                # if the account supports RC4. The KDC will honor the request.
+                $encTypes = $user.'msDS-SupportedEncryptionTypes'
+                $hasAES = $false
+                $hasRC4 = $false
+                $hasDES = $false
+                $encryptionRisk = 'Unknown'
+
+                if ($encTypes) {
+                    $hasAES = ($encTypes -band 0x18) -ne 0  # AES128 or AES256
+                    $hasRC4 = ($encTypes -band 0x04) -ne 0  # RC4-HMAC
+                    $hasDES = ($encTypes -band 0x03) -ne 0  # DES-CBC-CRC or DES-CBC-MD5
+
+                    if (-not $hasAES) {
+                        # No AES at all - critical risk
+                        $encryptionRisk = 'Critical - No AES support'
+                    } elseif ($hasRC4 -or $hasDES) {
+                        # Has AES but also weak types - still vulnerable
+                        $encryptionRisk = 'High - RC4/DES enabled alongside AES'
+                    } else {
+                        # AES only - best configuration
+                        $encryptionRisk = 'Low - AES only'
                     }
                 } else {
-                    # No encryption types set defaults to RC4
-                    $weakEncryption = $true
+                    # No encryption types set = defaults to RC4 only
+                    $hasRC4 = $true
+                    $encryptionRisk = 'Critical - Defaults to RC4 only'
                 }
+
+                # Flag as weak if RC4 or DES is available (attackers can request these)
+                $weakEncryption = $hasRC4 -or $hasDES -or (-not $hasAES)
 
                 $findings += [PSCustomObject]@{
                     SamAccountName     = $user.SamAccountName
@@ -63,6 +88,11 @@
                     SPNCount           = $user.ServicePrincipalName.Count
                     PasswordAgeDays    = $passwordAge
                     WeakEncryption     = $weakEncryption
+                    EncryptionRisk     = $encryptionRisk
+                    EncryptionTypes    = $encTypes
+                    HasAES             = $hasAES
+                    HasRC4             = $hasRC4
+                    HasDES             = $hasDES
                     Enabled            = $user.Enabled
                     AdminCount         = $user.AdminCount
                     DistinguishedName  = $user.DistinguishedName

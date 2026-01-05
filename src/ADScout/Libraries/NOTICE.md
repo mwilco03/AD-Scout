@@ -40,16 +40,44 @@ It is distributed as a separate DLL in compliance with LGPL requirements.
 These libraries are **optional**. AD-Scout functions without them but with
 reduced protocol-level detection capabilities.
 
-To use these libraries:
+### Quick Install (Download Releases)
 
-1. Download from the source repositories above
-2. Build or download the release DLLs
-3. Place DLLs in this directory:
-   - `SMBLibrary.dll`
-   - `RPCForSMBLibrary.dll`
-4. Restart PowerShell session
+**SMBLibrary** (v1.5.x or later):
+- Go to: https://github.com/TalAloni/SMBLibrary/releases
+- Download the latest `.nupkg` or build from source
+- Extract `SMBLibrary.dll` from `lib/net472/` or `lib/netstandard2.0/`
+
+**RPCForSMBLibrary**:
+- Go to: https://github.com/vletoux/RPCForSMBLibrary
+- Clone and build (no pre-built releases available)
+
+### Installation Steps
+
+1. Download or build the DLLs (see above)
+2. Copy DLLs to the AD-Scout Libraries directory:
+   ```powershell
+   # Find the Libraries directory
+   $libPath = Join-Path (Get-Module ADScout).ModuleBase 'Libraries'
+
+   # Copy the DLLs
+   Copy-Item SMBLibrary.dll $libPath
+   Copy-Item RPCForSMBLibrary.dll $libPath
+   ```
+3. Restart your PowerShell session
+4. Verify installation:
+   ```powershell
+   # Should return $true if DLLs are loaded
+   Initialize-ADScoutSMBLibrary
+   ```
 
 AD-Scout will automatically load them when needed for DLL-required rules.
+
+### Troubleshooting
+
+If DLLs fail to load:
+- **"Could not load file or assembly"**: Ensure .NET Framework 4.7.2+ or .NET 6+ is installed
+- **"Assembly mismatch"**: DLL version must match - try downloading matching versions
+- **PowerShell execution policy**: DLLs must not be blocked - run `Unblock-File *.dll`
 
 ## Feature Comparison
 

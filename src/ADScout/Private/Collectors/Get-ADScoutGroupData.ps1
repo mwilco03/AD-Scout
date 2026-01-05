@@ -53,9 +53,12 @@ function Get-ADScoutGroupData {
 
     $groups = @()
 
-    if (Get-Module -ListAvailable ActiveDirectory -ErrorAction SilentlyContinue) {
+    # Use centralized method detection (cached)
+    $collectorMethod = Get-ADScoutCollectorMethod
+
+    if ($collectorMethod -eq 'ADModule') {
         try {
-            Import-Module ActiveDirectory -ErrorAction Stop
+            Write-Verbose "Using ActiveDirectory module"
 
             $params = @{
                 Filter     = '*'
@@ -73,7 +76,7 @@ function Get-ADScoutGroupData {
         }
     }
     else {
-        Write-Verbose "AD module not available, using DirectorySearcher"
+        Write-Verbose "Using DirectorySearcher method"
         $groups = Get-ADScoutGroupDataFallback -Domain $Domain -Server $Server -Credential $Credential
     }
 

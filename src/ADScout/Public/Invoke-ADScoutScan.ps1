@@ -249,6 +249,7 @@ function Invoke-ADScoutScan {
                 Trusts       = Get-ADScoutTrustData @adDataParams
                 GPOs         = Get-ADScoutGPOData @adDataParams
                 Certificates = Get-ADScoutCertificateData @adDataParams
+                DomainControllers = Get-ADScoutDomainControllerData @adDataParams
                 Domain       = $Domain
                 Server       = $Server
                 ScanTime     = $startTime
@@ -267,6 +268,7 @@ function Invoke-ADScoutScan {
                 Trusts       = Get-ADScoutTrustData @adDataParams
                 GPOs         = Get-ADScoutGPOData @adDataParams
                 Certificates = Get-ADScoutCertificateData @adDataParams
+                DomainControllers = Get-ADScoutDomainControllerData @adDataParams
                 Domain       = $Domain
                 Server       = $Server
                 ScanTime     = $startTime
@@ -274,7 +276,7 @@ function Invoke-ADScoutScan {
             }
         }
 
-        Write-Verbose "AD data collection complete"
+        Write-Verbose "AD data collection complete: Users=$($adData.Users.Count), Computers=$($adData.Computers.Count), Groups=$($adData.Groups.Count)"
 
         # Collect Entra ID data if requested or EntraID category is specified
         $entraConnected = Test-ADScoutGraphConnection
@@ -303,16 +305,18 @@ function Invoke-ADScoutScan {
         Write-Verbose "Data collection complete"
 
         # Execute rules
-        $results = @()
-        $ruleCount = 0
+        $results = [System.Collections.Generic.List[PSCustomObject]]::new()
         $totalRules = $rules.Count
 
+        Write-Verbose "Executing $totalRules rules"
+
+        $ruleCount = 0
         foreach ($rule in $rules) {
             $ruleCount++
             $percentComplete = [math]::Round(($ruleCount / $totalRules) * 100)
 
             Write-Progress -Activity "Executing security rules" `
-                           -Status "Running: $($rule.Name)" `
+                           -Status "Running: $($rule.Name) ($ruleCount/$totalRules)" `
                            -PercentComplete $percentComplete
 
             Write-Verbose "Executing rule: $($rule.Id) - $($rule.Name)"
@@ -327,53 +331,12 @@ function Invoke-ADScoutScan {
                     }
                 }
 
-                # Execute the rule
-                $findings = & $rule.ScriptBlock -ADData $adData
+                # Execute the rule using Invoke-RuleEvaluation for consistent handling
+                $finding = Invoke-RuleEvaluation -Rule $rule -Data $adData -Domain $Domain
 
-                if ($findings) {
-                    $findingCount = @($findings).Count
-
-                    # Calculate score based on computation type
-                    $score = switch ($rule.Computation) {
-                        'TriggerOnPresence' {
-                            $rule.Points
-                        }
-                        'PerDiscover' {
-                            [math]::Min($findingCount * $rule.Points, $rule.MaxPoints)
-                        }
-                        'TriggerOnThreshold' {
-                            if ($findingCount -ge $rule.Threshold) { $rule.Points } else { 0 }
-                        }
-                        'TriggerIfLessThan' {
-                            if ($findingCount -lt $rule.Threshold) { $rule.Points } else { 0 }
-                        }
-                        default {
-                            $findingCount * $rule.Points
-                        }
-                    }
-
-                    $result = [PSCustomObject]@{
-                        PSTypeName   = 'ADScoutResult'
-                        RuleId       = $rule.Id
-                        RuleName     = $rule.Name
-                        Category     = $rule.Category
-                        Description  = $rule.Description
-                        FindingCount = $findingCount
-                        Score        = $score
-                        MaxScore     = $rule.MaxPoints
-                        Findings     = $findings
-                        MITRE        = $rule.MITRE
-                        CIS          = $rule.CIS
-                        STIG         = $rule.STIG
-                        Remediation  = $rule.Remediation
-                        TechnicalExplanation = $rule.TechnicalExplanation
-                        References   = $rule.References
-                        ExecutedAt   = Get-Date
-                    }
-
-                    $results += $result
-
-                    Write-Verbose "Rule $($rule.Id) found $findingCount issues (Score: $score)"
+                if ($finding -and $finding.FindingCount -gt 0) {
+                    $results.Add($finding)
+                    Write-Verbose "Rule $($rule.Id) found $($finding.FindingCount) issues (Score: $($finding.Score))"
                 }
                 else {
                     Write-Verbose "Rule $($rule.Id) passed with no findings"
@@ -392,7 +355,7 @@ function Invoke-ADScoutScan {
         $duration = $endTime - $startTime
 
         # Merge with baseline if incremental mode
-        $finalResults = $results
+        $finalResults = $results.ToArray()
         if ($script:IncrementalMode -and $script:BaselineResults.Count -gt 0) {
             Write-Verbose "Merging incremental results with baseline..."
 

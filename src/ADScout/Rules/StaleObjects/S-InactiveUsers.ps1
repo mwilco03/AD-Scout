@@ -13,7 +13,7 @@
     )
 
     MITRE = @{
-        Tactics    = @('TA0001', 'TA0003')  # Initial Access, Persistence
+        Tactics    = @('TA0003', 'TA0005')  # Persistence, Defense Evasion (stale accounts evade review)
         Techniques = @('T1078.002')          # Valid Accounts: Domain Accounts
     }
 

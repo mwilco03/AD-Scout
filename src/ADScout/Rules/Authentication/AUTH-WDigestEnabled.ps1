@@ -19,10 +19,10 @@
     Version     = '1.0.0'
     Category    = 'Authentication'
     Title       = 'WDigest Clear Text Credential Storage'
-    Description = 'Detects systems where WDigest is storing credentials in clear text memory, enabling credential theft via tools like Mimikatz.'
+    Description = 'Detects systems where WDigest is storing credentials in clear text memory. Checks both GPO enforcement AND individual DC registry to ensure protection is applied consistently.'
     Severity    = 'Critical'
     Weight      = 65
-    DataSource  = 'DomainControllers'
+    DataSource  = 'DomainControllers,GPOs'
 
     References  = @(
         @{ Title = 'WDigest Clear Text Credentials'; Url = 'https://blog.stealthbits.com/wdigest-clear-text-passwords-stealing-more-than-a-hash/' }
@@ -48,68 +48,119 @@
         param($Data, $Domain)
 
         $findings = @()
+        $dcs = if ($Data.DomainControllers) { $Data.DomainControllers } else { $Data }
 
-        if ($Data.DomainControllers) {
-            foreach ($dc in $Data.DomainControllers) {
-                $dcName = $dc.Name
-                if (-not $dcName) { $dcName = $dc.DnsHostName }
-                if (-not $dcName) { continue }
+        # ========================================================================
+        # BELT: Check GPO enforcement for WDigest disable
+        # ========================================================================
+        $gpoDisablesWDigest = $false
 
-                $wdigestStatus = 'Unknown'
-                $useLogonCredential = $null
-
+        if ($Data.GPOs) {
+            foreach ($gpo in $Data.GPOs) {
                 try {
-                    $regResult = Invoke-Command -ComputerName $dcName -ScriptBlock {
-                        # Check UseLogonCredential registry value
-                        $wdigestPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'
-                        $value = Get-ItemProperty -Path $wdigestPath -Name 'UseLogonCredential' -ErrorAction SilentlyContinue
-
-                        # Also check if the key exists
-                        $keyExists = Test-Path $wdigestPath
-
-                        @{
-                            UseLogonCredential = $value.UseLogonCredential
-                            KeyExists = $keyExists
-                            OSVersion = [System.Environment]::OSVersion.Version.ToString()
+                    # Check registry preferences for UseLogonCredential = 0
+                    $regPolPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Registry.pol"
+                    if (Test-Path $regPolPath -ErrorAction SilentlyContinue) {
+                        $bytes = [System.IO.File]::ReadAllBytes($regPolPath)
+                        $content = [System.Text.Encoding]::Unicode.GetString($bytes)
+                        if ($content -match 'WDigest.*UseLogonCredential') {
+                            $gpoDisablesWDigest = $true
+                            break
                         }
-                    } -ErrorAction Stop
+                    }
 
-                    if ($regResult) {
-                        $useLogonCredential = $regResult.UseLogonCredential
-
-                        # Determine vulnerability status
-                        if ($useLogonCredential -eq 1) {
-                            $wdigestStatus = 'Enabled (VULNERABLE)'
-                        } elseif ($useLogonCredential -eq 0) {
-                            $wdigestStatus = 'Disabled (Secure)'
-                        } elseif ($null -eq $useLogonCredential) {
-                            # Default behavior depends on OS version
-                            # Windows 8.1/2012 R2 and later: disabled by default (if KB2871997 installed)
-                            # Earlier: enabled by default
-                            $osVersion = $regResult.OSVersion
-                            if ($osVersion -match '^6\.[0-2]' -or $osVersion -match '^5\.') {
-                                $wdigestStatus = 'Not configured (defaults to ENABLED on this OS)'
-                            } else {
-                                $wdigestStatus = 'Not configured (likely defaults to disabled)'
-                            }
+                    # Also check Group Policy Preferences XML
+                    $prefPath = "\\$Domain\SYSVOL\$Domain\Policies\{$($gpo.Id)}\Machine\Preferences\Registry\Registry.xml"
+                    if (Test-Path $prefPath -ErrorAction SilentlyContinue) {
+                        $content = Get-Content $prefPath -Raw -ErrorAction SilentlyContinue
+                        if ($content -match 'UseLogonCredential' -and $content -match 'WDigest') {
+                            $gpoDisablesWDigest = $true
+                            break
                         }
                     }
                 } catch {
-                    $wdigestStatus = 'Unable to check'
+                    Write-Verbose "AUTH-WDigestEnabled: Could not check GPO $($gpo.DisplayName): $_"
                 }
+            }
+        }
 
-                # Report if vulnerable or unknown
-                if ($wdigestStatus -match 'VULNERABLE|ENABLED|Unable') {
-                    $findings += [PSCustomObject]@{
-                        Computer            = $dcName
-                        WDigestStatus       = $wdigestStatus
-                        UseLogonCredential  = if ($null -eq $useLogonCredential) { 'Not Set' } else { $useLogonCredential }
-                        RiskLevel           = if ($wdigestStatus -match 'VULNERABLE|ENABLED') { 'Critical' } else { 'High' }
-                        OperatingSystem     = $dc.OperatingSystem
-                        Impact              = 'Clear text passwords stored in LSASS memory'
-                        AttackTool          = 'Mimikatz sekurlsa::wdigest'
-                        DistinguishedName   = $dc.DistinguishedName
+        if (-not $gpoDisablesWDigest) {
+            $findings += [PSCustomObject]@{
+                ObjectType          = 'GPO Policy'
+                Computer            = 'Domain-wide'
+                WDigestStatus       = 'No GPO enforces WDigest disable'
+                UseLogonCredential  = 'Not Enforced'
+                RiskLevel           = 'High'
+                OperatingSystem     = 'N/A'
+                Impact              = 'DC configurations may drift - no policy enforcement'
+                AttackTool          = 'Mimikatz sekurlsa::wdigest'
+                DistinguishedName   = 'N/A'
+                ConfigSource        = 'Missing GPO'
+            }
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check each DC's actual WDigest configuration
+        # ========================================================================
+        foreach ($dc in $dcs) {
+            $dcName = $dc.Name
+            if (-not $dcName) { $dcName = $dc.DnsHostName }
+            if (-not $dcName) { continue }
+
+            $wdigestStatus = 'Unknown'
+            $useLogonCredential = $null
+
+            try {
+                $regResult = Invoke-Command -ComputerName $dcName -ScriptBlock {
+                    # Check UseLogonCredential registry value
+                    $wdigestPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'
+                    $value = Get-ItemProperty -Path $wdigestPath -Name 'UseLogonCredential' -ErrorAction SilentlyContinue
+
+                    # Also check if the key exists
+                    $keyExists = Test-Path $wdigestPath
+
+                    @{
+                        UseLogonCredential = $value.UseLogonCredential
+                        KeyExists = $keyExists
+                        OSVersion = [System.Environment]::OSVersion.Version.ToString()
                     }
+                } -ErrorAction Stop
+
+                if ($regResult) {
+                    $useLogonCredential = $regResult.UseLogonCredential
+
+                    # Determine vulnerability status
+                    if ($useLogonCredential -eq 1) {
+                        $wdigestStatus = 'Enabled (VULNERABLE)'
+                    } elseif ($useLogonCredential -eq 0) {
+                        $wdigestStatus = 'Disabled (Secure)'
+                    } elseif ($null -eq $useLogonCredential) {
+                        # Default behavior depends on OS version
+                        $osVersion = $regResult.OSVersion
+                        if ($osVersion -match '^6\.[0-2]' -or $osVersion -match '^5\.') {
+                            $wdigestStatus = 'Not configured (defaults to ENABLED on this OS)'
+                        } else {
+                            $wdigestStatus = 'Not configured (likely defaults to disabled)'
+                        }
+                    }
+                }
+            } catch {
+                $wdigestStatus = 'Unable to check'
+            }
+
+            # Report if vulnerable or unknown
+            if ($wdigestStatus -match 'VULNERABLE|ENABLED|Unable') {
+                $findings += [PSCustomObject]@{
+                    ObjectType          = 'DC Configuration'
+                    Computer            = $dcName
+                    WDigestStatus       = $wdigestStatus
+                    UseLogonCredential  = if ($null -eq $useLogonCredential) { 'Not Set' } else { $useLogonCredential }
+                    RiskLevel           = if ($wdigestStatus -match 'VULNERABLE|ENABLED') { 'Critical' } else { 'High' }
+                    OperatingSystem     = $dc.OperatingSystem
+                    Impact              = 'Clear text passwords stored in LSASS memory'
+                    AttackTool          = 'Mimikatz sekurlsa::wdigest'
+                    DistinguishedName   = $dc.DistinguishedName
+                    ConfigSource        = 'Registry'
                 }
             }
         }

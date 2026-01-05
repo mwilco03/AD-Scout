@@ -19,8 +19,8 @@
         Techniques = @('T1556.005', 'T1098.001')  # Modify Authentication Process: Reversible Encryption, Account Manipulation: Additional Cloud Credentials
     }
 
-    CIS   = @()
-    STIG  = @()
+    CIS   = @('5.1', '5.6')  # Account Management, PKI Certificate policies
+    STIG  = @('V-36435', 'V-36432')  # AD object permissions, Privileged account protection
     ANSSI = @('vuln1_shadow_credentials')
 
     Scoring = @{

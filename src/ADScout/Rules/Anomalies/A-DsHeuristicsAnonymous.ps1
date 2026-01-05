@@ -35,12 +35,18 @@
 
         <#
         dsHeuristics is a string where each character position controls a different setting:
-        Position 7 (index 6): fDoListObject - List object mode
-        Position 8 (index 7): fDoNotElevate - Don't elevate during install
-        Position 9 (index 8): fAllowAnonymousAccess - Allow anonymous access to LDAP
-        Position 10 (index 9): fLDAPBlockAnonOps - Block anonymous operations
+        Per MS-ADTS documentation:
+        Position 1 (index 0): fSupFirstLastANR
+        Position 2 (index 1): fSupLastFirstANR
+        Position 3 (index 2): fDoListObject (legacy)
+        Position 4 (index 3): fDoNotFreeResourceProperties
+        Position 5 (index 4): Reserved
+        Position 6 (index 5): fUserPwdSupport
+        Position 7 (index 6): fAllowAnonymousAccess - Allow anonymous access to LDAP
+        Position 8 (index 7): Reserved
+        Position 9 (index 8): fLDAPBlockAnonOps - Block anonymous operations
 
-        A value of '2' at position 7 enables anonymous LDAP access (fAllowAnonymousAccess)
+        A value of '2' at position 7 (index 6) enables anonymous LDAP access
         #>
 
         try {
@@ -56,20 +62,14 @@
             if ($dsHeuristics) {
                 $heuristicsValue = $dsHeuristics.ToString()
 
-                # Check position 7 (index 6) - fDoListObject
-                # This can affect enumeration behavior
+                # Check position 7 (index 6) - fAllowAnonymousAccess
+                # '2' = Allow anonymous LDAP operations
                 if ($heuristicsValue.Length -ge 7) {
-                    $doListObject = $heuristicsValue[6]
-                    # Values: 0 = default, 1 = enabled, 2 = enabled with special behavior
-                }
-
-                # Check position 9 (index 8) - Anonymous access related
-                if ($heuristicsValue.Length -ge 9) {
-                    $anonAccess = $heuristicsValue[8]
+                    $anonAccess = $heuristicsValue[6]
                     if ($anonAccess -eq '2') {
                         $findings += [PSCustomObject]@{
                             DsHeuristics        = $heuristicsValue
-                            Position            = '9 (fAllowAnonymousAccess)'
+                            Position            = '7 (fAllowAnonymousAccess)'
                             Value               = $anonAccess
                             Setting             = 'Anonymous LDAP access enabled'
                             Severity            = 'High'
@@ -80,22 +80,29 @@
                     }
                 }
 
+                # Check position 9 (index 8) - fLDAPBlockAnonOps
+                # '0' = anonymous operations NOT blocked (vulnerable)
+                if ($heuristicsValue.Length -ge 9) {
+                    $blockAnonOps = $heuristicsValue[8]
+                    # We only report if this is explicitly set to allow (not blocking)
+                }
+
                 # Check for any non-default dsHeuristics values that affect security
                 if ($heuristicsValue.Length -gt 0 -and $heuristicsValue -ne '0000000') {
                     # Report the current configuration for awareness
                     $configuredSettings = @()
 
-                    # Analyze each known position
+                    # Analyze each known position (per MS-ADTS documentation)
                     $positions = @{
                         1 = 'fSupFirstLastANR'
                         2 = 'fSupLastFirstANR'
                         3 = 'fDoListObject (legacy)'
-                        4 = 'fLDAPBlockAnonOps'
+                        4 = 'fDoNotFreeResourceProperties'
                         5 = 'Reserved'
                         6 = 'fUserPwdSupport'
-                        7 = 'fDoListObject'
+                        7 = 'fAllowAnonymousAccess'
                         8 = 'Reserved'
-                        9 = 'fAllowAnonymousAccess'
+                        9 = 'fLDAPBlockAnonOps'
                     }
 
                     for ($i = 0; $i -lt [Math]::Min($heuristicsValue.Length, 20); $i++) {

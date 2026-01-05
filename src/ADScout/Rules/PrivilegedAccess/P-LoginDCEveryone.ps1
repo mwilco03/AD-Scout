@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'PrivilegedAccess'
     Title       = 'Everyone Can Log On to Domain Controllers'
-    Description = 'Detects when the "Allow log on locally" or "Allow log on through Remote Desktop Services" user rights on Domain Controllers include Everyone, Authenticated Users, Domain Users, or other broad groups. This violates the principle of least privilege and enables credential theft.'
+    Description = 'Detects when the "Allow log on locally" or "Allow log on through Remote Desktop Services" user rights on Domain Controllers include Everyone, Authenticated Users, Domain Users, or other broad groups. Checks both GPO configuration AND DC local policy. This violates the principle of least privilege and enables credential theft.'
     Severity    = 'Critical'
     Weight      = 40
-    DataSource  = 'GPOs'
+    DataSource  = 'GPOs,DomainControllers'
 
     References  = @(
         @{ Title = 'Securing Domain Controllers'; Url = 'https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/plan/security-best-practices/securing-domain-controllers-against-attack' }
@@ -54,6 +54,9 @@
             'SeServiceLogonRight' = 'Log on as a service'
         }
 
+        # ========================================================================
+        # BELT: Check GPO enforcement for DC logon rights
+        # ========================================================================
         try {
             # Check GPOs linked to Domain Controllers OU
             foreach ($gpo in $Data.GPOs) {
@@ -101,14 +104,16 @@
 
                             if ($isDangerous) {
                                 $findings += [PSCustomObject]@{
+                                    ObjectType          = 'GPO Policy'
                                     GPOName             = $gpo.DisplayName
+                                    Source              = 'Domain Controllers OU'
                                     UserRight           = $sensitiveRights[$rightName]
                                     UserRightKey        = $rightName
                                     DangerousPrincipal  = $principal
-                                    LinkedTo            = 'Domain Controllers OU'
                                     Severity            = 'Critical'
                                     Risk                = 'Non-privileged users can log on to Domain Controllers'
                                     Impact              = 'Credential theft, DC compromise, domain takeover'
+                                    ConfigSource        = 'GPO'
                                 }
                             }
                         }
@@ -116,14 +121,116 @@
                 }
             }
 
-            # If no GPO data, check via registry/secedit on DCs
-            if ($findings.Count -eq 0 -and $Data.DomainControllers) {
-                # Add a note that manual verification is needed
-                # In production, this would use remote registry or Invoke-Command
-            }
-
         } catch {
-            Write-Verbose "P-LoginDCEveryone: Error - $_"
+            Write-Verbose "P-LoginDCEveryone: Error checking GPO - $_"
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check actual DC local policy for logon rights
+        # ========================================================================
+        if ($Data.DomainControllers) {
+            foreach ($dc in $Data.DomainControllers) {
+                $dcName = $dc.Name
+                if (-not $dcName) { $dcName = $dc.DnsHostName }
+                if (-not $dcName) { continue }
+
+                try {
+                    $userRightsData = Invoke-Command -ComputerName $dcName -ScriptBlock {
+                        $result = @{
+                            Rights = @{}
+                            Error = $null
+                        }
+
+                        try {
+                            # Export security policy to temp file
+                            $tempFile = [System.IO.Path]::GetTempFileName()
+                            $seceditOutput = secedit /export /cfg $tempFile /areas USER_RIGHTS 2>&1
+
+                            if (Test-Path $tempFile) {
+                                $content = Get-Content $tempFile -Raw
+
+                                # Parse the relevant user rights
+                                $rightsToCheck = @(
+                                    'SeInteractiveLogonRight',
+                                    'SeRemoteInteractiveLogonRight',
+                                    'SeBatchLogonRight',
+                                    'SeServiceLogonRight'
+                                )
+
+                                foreach ($right in $rightsToCheck) {
+                                    if ($content -match "$right\s*=\s*(.+)") {
+                                        $sids = $Matches[1].Trim() -split ','
+                                        $result.Rights[$right] = $sids | ForEach-Object { $_.Trim().TrimStart('*') }
+                                    }
+                                }
+
+                                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+                            }
+                        } catch {
+                            $result.Error = $_.Exception.Message
+                        }
+
+                        return $result
+                    } -ErrorAction SilentlyContinue
+
+                    if ($userRightsData -and $userRightsData.Rights.Count -gt 0) {
+                        foreach ($rightEntry in $userRightsData.Rights.GetEnumerator()) {
+                            $rightName = $rightEntry.Key
+                            $sids = $rightEntry.Value
+
+                            if ($rightName -notin $sensitiveRights.Keys) { continue }
+
+                            foreach ($sid in $sids) {
+                                $isDangerous = $false
+                                $principalName = $sid
+
+                                # Resolve SID to name if possible
+                                try {
+                                    $sidObj = New-Object System.Security.Principal.SecurityIdentifier($sid)
+                                    $principalName = $sidObj.Translate([System.Security.Principal.NTAccount]).Value
+                                } catch {
+                                    # Keep the SID if we can't resolve it
+                                }
+
+                                # Check if this is a dangerous principal
+                                foreach ($dp in $dangerousPrincipals) {
+                                    if ($dp.StartsWith('*')) {
+                                        if ($sid -like $dp -or $principalName -like $dp) {
+                                            $isDangerous = $true
+                                            break
+                                        }
+                                    } elseif ($principalName -match [regex]::Escape($dp) -or
+                                              $principalName -eq $dp -or
+                                              $sid -eq $dp) {
+                                        $isDangerous = $true
+                                        break
+                                    }
+                                }
+
+                                if ($isDangerous) {
+                                    $findings += [PSCustomObject]@{
+                                        ObjectType          = 'DC Configuration'
+                                        GPOName             = 'Local Policy'
+                                        Source              = $dcName
+                                        UserRight           = $sensitiveRights[$rightName]
+                                        UserRightKey        = $rightName
+                                        DangerousPrincipal  = $principalName
+                                        SID                 = $sid
+                                        Severity            = 'Critical'
+                                        Risk                = 'Non-privileged users can log on to this Domain Controller'
+                                        Impact              = 'Credential theft, DC compromise, domain takeover'
+                                        ConfigSource        = 'Local Policy'
+                                        DistinguishedName   = $dc.DistinguishedName
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                } catch {
+                    Write-Verbose "P-LoginDCEveryone: Could not check DC $dcName - $_"
+                }
+            }
         }
 
         return $findings
