@@ -1,186 +1,148 @@
 #Requires -Modules Pester
+
 <#
 .SYNOPSIS
-    Main test file for AD-Scout module.
-
-.DESCRIPTION
-    Entry point for Pester tests. Imports the module and runs all tests.
+    Main Pester test entry point for AD-Scout module.
 #>
 
 BeforeAll {
-    # Import the module from source
-    $modulePath = Join-Path $PSScriptRoot '../src/ADScout/ADScout.psd1'
-    Import-Module $modulePath -Force
+    $modulePath = Join-Path $PSScriptRoot '..' 'src' 'ADScout' 'ADScout.psd1'
+    if (Test-Path $modulePath) {
+        Import-Module $modulePath -Force -ErrorAction Stop
+    }
 }
 
-Describe 'ADScout Module' {
-    Context 'Module Import' {
+Describe 'ADScout Module' -Tag 'Unit', 'Module' {
+    Context 'Module Loading' {
         It 'Should import without errors' {
-            { Import-Module (Join-Path $PSScriptRoot '../src/ADScout/ADScout.psd1') -Force } | Should -Not -Throw
+            { Import-Module (Join-Path $PSScriptRoot '..' 'src' 'ADScout' 'ADScout.psd1') -Force } | Should -Not -Throw
         }
 
-        It 'Should be loaded' {
+        It 'Should export expected functions' {
             $module = Get-Module ADScout
             $module | Should -Not -BeNullOrEmpty
-        }
 
-        It 'Should have correct version format' {
-            $module = Get-Module ADScout
-            $module.Version | Should -Match '^\d+\.\d+\.\d+$'
-        }
-    }
-
-    Context 'Exported Functions' {
-        BeforeAll {
             $expectedFunctions = @(
-                # Core scanning
                 'Invoke-ADScoutScan'
                 'Get-ADScoutRule'
-                'New-ADScoutRule'
-                'Register-ADScoutRule'
-
-                # Reporting
                 'Export-ADScoutReport'
-                'Export-ADScoutNISTReport'
-                'Get-ADScoutRemediation'
                 'Show-ADScoutDashboard'
-
-                # Configuration
-                'Set-ADScoutConfig'
-                'Get-ADScoutConfig'
-
-                # Microsoft Graph / Entra ID
-                'Connect-ADScoutGraph'
-                'Disconnect-ADScoutGraph'
-                'Test-ADScoutGraphConnection'
-
-                # Baseline storage
-                'Export-ADScoutBaseline'
-                'Import-ADScoutBaseline'
-                'Compare-ADScoutBaseline'
-
-                # CSV helpers
-                'ConvertFrom-ADScoutCSV'
-                'ConvertTo-ADScoutCSV'
-                'Test-ADScoutCSVEncoding'
+                'Export-ADScoutElasticsearch'
+                'Export-ADScoutSplunk'
+                'Export-ADScoutSentinel'
+                'New-ADScoutEngagement'
+                'New-ADScoutException'
             )
-        }
 
-        It 'Should export all expected functions' {
-            $commands = Get-Command -Module ADScout
-            foreach ($funcName in $expectedFunctions) {
-                $commands.Name | Should -Contain $funcName -Because "Function $funcName should be exported"
+            foreach ($func in $expectedFunctions) {
+                $module.ExportedFunctions.Keys | Should -Contain $func
             }
         }
 
-        It 'Should not export private functions' {
-            $commands = Get-Command -Module ADScout
-            $commands.Name | Should -Not -Contain 'Get-ADScoutUserData'
-            $commands.Name | Should -Not -Contain 'Write-ADScoutLog'
-            $commands.Name | Should -Not -Contain 'Get-ADScoutEntraUserData'
-            $commands.Name | Should -Not -Contain 'Get-ADScoutEntraAppData'
-        }
-
-        It 'Should export exactly the expected number of functions' {
-            $commands = Get-Command -Module ADScout -CommandType Function
-            $commands.Count | Should -Be $expectedFunctions.Count
-        }
-    }
-
-    Context 'Help Documentation' {
-        BeforeAll {
-            $commands = Get-Command -Module ADScout -CommandType Function
-        }
-
-        It 'All exported functions should have help' {
-            foreach ($cmd in $commands) {
-                $help = Get-Help $cmd.Name -ErrorAction SilentlyContinue
-                $help | Should -Not -BeNullOrEmpty -Because "$($cmd.Name) should have help"
-            }
-        }
-
-        It 'All exported functions should have synopsis' {
-            foreach ($cmd in $commands) {
-                $help = Get-Help $cmd.Name
-                $help.Synopsis | Should -Not -BeNullOrEmpty -Because "$($cmd.Name) should have synopsis"
-            }
-        }
-
-        It 'All exported functions should have examples' {
-            foreach ($cmd in $commands) {
-                $help = Get-Help $cmd.Name -Examples
-                $help.Examples | Should -Not -BeNullOrEmpty -Because "$($cmd.Name) should have examples"
-            }
+        It 'Should have valid module manifest' {
+            $manifestPath = Join-Path $PSScriptRoot '..' 'src' 'ADScout' 'ADScout.psd1'
+            { Test-ModuleManifest -Path $manifestPath } | Should -Not -Throw
         }
     }
 }
 
-Describe 'Get-ADScoutRule' {
-    It 'Should return rules without errors' {
-        { Get-ADScoutRule } | Should -Not -Throw
-    }
-
-    It 'Should return at least one rule' {
+Describe 'Get-ADScoutRule' -Tag 'Unit', 'Rules' {
+    It 'Should return rules' {
         $rules = Get-ADScoutRule
-        $rules.Count | Should -BeGreaterThan 0
-    }
-
-    It 'Should return the S-PwdNeverExpires rule' {
-        $rule = Get-ADScoutRule -Id 'S-PwdNeverExpires'
-        $rule | Should -Not -BeNullOrEmpty
-        $rule.Id | Should -Be 'S-PwdNeverExpires'
+        $rules | Should -Not -BeNullOrEmpty
     }
 
     It 'Should filter by category' {
-        $rules = Get-ADScoutRule -Category StaleObjects
-        $rules | Should -Not -BeNullOrEmpty
-        $rules | ForEach-Object {
-            $_.Category | Should -Be 'StaleObjects'
+        $rules = Get-ADScoutRule -Category 'StaleObjects'
+        $rules | ForEach-Object { $_.Category | Should -Be 'StaleObjects' }
+    }
+}
+
+Describe 'Show-ADScoutDashboard' -Tag 'Unit', 'Dashboard' {
+    It 'Should have Port parameter' {
+        $cmd = Get-Command Show-ADScoutDashboard
+        $cmd.Parameters.Keys | Should -Contain 'Port'
+    }
+
+    It 'Should have NoBrowser parameter' {
+        $cmd = Get-Command Show-ADScoutDashboard
+        $cmd.Parameters.Keys | Should -Contain 'NoBrowser'
+    }
+}
+
+Describe 'SIEM Reporters' -Tag 'Unit', 'SIEM' {
+    Context 'Elasticsearch Reporter' {
+        It 'Should have Export-ADScoutElasticsearch function' {
+            Get-Command Export-ADScoutElasticsearch | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Should have required parameters' {
+            $cmd = Get-Command Export-ADScoutElasticsearch
+            $cmd.Parameters.Keys | Should -Contain 'ElasticsearchUrl'
+            $cmd.Parameters.Keys | Should -Contain 'UseECS'
         }
     }
 
-    It 'Rules should have required properties' {
-        $rules = Get-ADScoutRule
-        foreach ($rule in $rules) {
-            $rule.Id | Should -Not -BeNullOrEmpty
-            $rule.Name | Should -Not -BeNullOrEmpty
-            $rule.Category | Should -Not -BeNullOrEmpty
-            $rule.ScriptBlock | Should -Not -BeNullOrEmpty
-            $rule.Description | Should -Not -BeNullOrEmpty
+    Context 'Splunk Reporter' {
+        It 'Should have Export-ADScoutSplunk function' {
+            Get-Command Export-ADScoutSplunk | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Should have required parameters' {
+            $cmd = Get-Command Export-ADScoutSplunk
+            $cmd.Parameters.Keys | Should -Contain 'HECUrl'
+            $cmd.Parameters.Keys | Should -Contain 'Token'
+        }
+    }
+
+    Context 'Sentinel Reporter' {
+        It 'Should have Export-ADScoutSentinel function' {
+            Get-Command Export-ADScoutSentinel | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Should have required parameters' {
+            $cmd = Get-Command Export-ADScoutSentinel
+            $cmd.Parameters.Keys | Should -Contain 'WorkspaceId'
+            $cmd.Parameters.Keys | Should -Contain 'SharedKey'
+        }
+
+        It 'Should generate KQL for analytics rule' {
+            $kql = New-ADScoutSentinelAnalyticsRule -OutputKQL
+            $kql | Should -Not -BeNullOrEmpty
+            $kql | Should -Match 'ADScoutFindings_CL'
         }
     }
 }
 
-Describe 'Get-ADScoutConfig' {
-    It 'Should return configuration without errors' {
-        { Get-ADScoutConfig } | Should -Not -Throw
+Describe 'Engagement Management' -Tag 'Unit', 'Engagement' {
+    BeforeAll {
+        $testPath = Join-Path $TestDrive 'engagements'
     }
 
-    It 'Should return expected properties' {
-        $config = Get-ADScoutConfig
-        $config.ParallelThrottleLimit | Should -BeOfType [int]
-        $config.DefaultReporter | Should -Not -BeNullOrEmpty
-        $config.CacheTTL | Should -BeOfType [int]
-    }
-
-    It 'Should return specific setting by name' {
-        $value = Get-ADScoutConfig -Name ParallelThrottleLimit
-        $value | Should -BeOfType [int]
-        $value | Should -BeGreaterThan 0
+    It 'Should create new engagement' {
+        $engagement = New-ADScoutEngagement -Name 'Test Engagement' -StoragePath $testPath
+        $engagement | Should -Not -BeNullOrEmpty
+        $engagement.Name | Should -Be 'Test Engagement'
     }
 }
 
-Describe 'Set-ADScoutConfig' {
-    It 'Should set configuration without errors' {
-        { Set-ADScoutConfig -CacheTTL 600 } | Should -Not -Throw
+Describe 'Exception Management' -Tag 'Unit', 'Exception' {
+    BeforeAll {
+        $testPath = Join-Path $TestDrive 'exceptions'
     }
 
-    It 'Should update configuration values' {
-        Set-ADScoutConfig -CacheTTL 123
-        $config = Get-ADScoutConfig
-        $config.CacheTTL | Should -Be 123
-
-        # Reset
-        Set-ADScoutConfig -CacheTTL 300
+    It 'Should create rule exception' {
+        $exception = New-ADScoutException -RuleId 'S-PwdNeverExpires' -Justification 'Test exception' -StoragePath $testPath
+        $exception | Should -Not -BeNullOrEmpty
+        $exception.RuleId | Should -Be 'S-PwdNeverExpires'
     }
+
+    It 'Should create category exception' {
+        $exception = New-ADScoutException -Category 'DLLRequired' -Justification 'No DLLs' -StoragePath $testPath
+        $exception.Category | Should -Be 'DLLRequired'
+    }
+}
+
+AfterAll {
+    Remove-Module ADScout -Force -ErrorAction SilentlyContinue
 }

@@ -40,6 +40,8 @@ Private/Compatibility/* → Private/Helpers/* → Private/Collectors/* → Publi
 
 ### Public Functions
 
+#### Core Scanning
+
 | Function | Purpose |
 |----------|---------|
 | `Invoke-ADScoutScan` | Main entry point for security scans |
@@ -50,7 +52,38 @@ Private/Compatibility/* → Private/Helpers/* → Private/Collectors/* → Publi
 | `Get-ADScoutRemediation` | Get remediation scripts for findings |
 | `Set-ADScoutConfig` | Configure module settings |
 | `Get-ADScoutConfig` | Retrieve current configuration |
-| `Show-ADScoutDashboard` | Interactive web dashboard |
+| `Show-ADScoutDashboard` | Interactive web dashboard (disk-backed) |
+
+#### SIEM Integrations
+
+| Function | Purpose |
+|----------|---------|
+| `Export-ADScoutElasticsearch` | Send results to Elasticsearch/OpenSearch |
+| `Export-ADScoutSplunk` | Send results to Splunk HEC |
+| `Export-ADScoutSentinel` | Send results to Azure Sentinel |
+| `New-ADScoutSentinelAnalyticsRule` | Generate KQL for Sentinel alerts |
+
+#### Engagement Management
+
+| Function | Purpose |
+|----------|---------|
+| `New-ADScoutEngagement` | Create named assessment context |
+| `Get-ADScoutEngagement` | List/retrieve engagements |
+| `Set-ADScoutEngagement` | Update engagement metadata |
+| `Remove-ADScoutEngagement` | Delete or archive engagement |
+| `Invoke-ADScoutEngagementScan` | Run scan within engagement |
+| `Get-ADScoutEngagementScans` | View engagement scan history |
+
+#### Exception Management
+
+| Function | Purpose |
+|----------|---------|
+| `New-ADScoutException` | Create finding exception |
+| `Get-ADScoutException` | List/retrieve exceptions |
+| `Set-ADScoutException` | Update exception status |
+| `Remove-ADScoutException` | Delete or revoke exception |
+| `Test-ADScoutException` | Check if finding is exempted |
+| `Get-ADScoutExceptionReport` | Generate exception report |
 
 ### Data Flow
 
@@ -518,6 +551,312 @@ tests/
 4. **Streaming**: Pipeline support for large datasets
 5. **Selective properties**: Request only needed AD attributes
 
+## Session Persistence (Disk-First Architecture)
+
+### Design Rationale
+
+AD-Scout uses a **disk-first, memory-cached** architecture for session data. This design choice addresses several operational requirements:
+
+| Problem | Solution |
+|---------|----------|
+| Large AD queries are expensive | Query once, persist to disk, serve from cache |
+| Scans can be interrupted | Resume from last saved state |
+| Process crashes lose data | Disk persistence survives restarts |
+| Multiple dashboards need same data | Shared disk storage, memory sync |
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Disk-First Architecture                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Scan Executes                                              │
+│         │                                                        │
+│         ▼                                                        │
+│   2. Results → DISK (immediately)                               │
+│         │     ~/.adscout/sessions/{session-id}/                 │
+│         │       ├── results.json    ← Full scan results         │
+│         │       ├── state.json      ← Status, timestamps        │
+│         │       └── progress.json   ← Resume checkpoint         │
+│         │                                                        │
+│         ▼                                                        │
+│   3. Memory Cache ← Load from disk                              │
+│         │                                                        │
+│         ▼                                                        │
+│   4. API Serves from Memory (fast reads)                        │
+│         │                                                        │
+│         ▼                                                        │
+│   5. Periodic Sync: if disk newer → reload memory               │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Not Memory-First?
+
+Memory-first approaches (query AD → store in memory → optionally save) have drawbacks:
+
+1. **Data loss on crash**: All results lost if process terminates
+2. **No resume capability**: Must restart entire scan from beginning
+3. **Single-process limitation**: Can't share between dashboard instances
+4. **Expensive re-queries**: Must re-run AD queries after restart
+
+### Session Management Functions
+
+| Function | Purpose |
+|----------|---------|
+| `Get-ADScoutSessionPath` | Creates/retrieves session storage directory |
+| `Save-ADScoutSessionState` | Persists results and progress to disk |
+| `Get-ADScoutSessionState` | Loads session state from disk |
+| `Get-ADScoutLatestSession` | Finds most recent session for resume |
+| `Sync-ADScoutDashboardFromDisk` | Reloads memory if disk is newer |
+
+### Session Storage Structure
+
+```
+~/.adscout/sessions/
+├── 20240104-143022/              # Session ID (timestamp-based)
+│   ├── results.json              # Full scan results
+│   ├── state.json                # { Status, LastUpdated, ResultCount }
+│   └── progress.json             # Resume checkpoint for partial scans
+├── 20240103-091500/
+│   └── ...
+└── ...
+
+# Engagement-scoped sessions
+~/.adscout/engagements/{engagement-id}/sessions/
+├── 20240104-143022/
+│   └── ...
+```
+
+### Resume Capability
+
+When a dashboard starts without results:
+
+```powershell
+# Check for existing session
+$latestSession = Get-ADScoutLatestSession -EngagementId $EngagementId
+
+if ($latestSession) {
+    # Load from disk instead of running new scan
+    $Results = (Get-ADScoutSessionState -SessionPath $latestSession.Path).Results
+    Write-Host "Resuming from session: $($latestSession.SessionId)"
+}
+```
+
+### Multi-Process Synchronization
+
+The dashboard checks if disk data is newer than memory on each API request:
+
+```powershell
+function Sync-ADScoutDashboardFromDisk {
+    $diskTime = (Get-Item $resultsFile).LastWriteTime
+
+    if ($diskTime -gt $script:DashboardResultsTimestamp) {
+        # Another process updated the file - reload
+        $script:DashboardResults = Get-Content $resultsFile | ConvertFrom-Json
+        $script:DashboardResultsTimestamp = $diskTime
+    }
+}
+```
+
+This enables scenarios like:
+- Running a scan from CLI while dashboard is open
+- Multiple team members viewing same engagement data
+- Background scheduled scans updating dashboard automatically
+
+## Incremental and Differential Scanning
+
+### Overview
+
+AD-Scout supports **incremental scanning** to significantly reduce scan time by only evaluating objects that have changed since the last scan. This is critical for large environments where full scans may take considerable time.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   Incremental Scan Flow                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Load Previous Watermark                                     │
+│         │   { HighestUSN: 12345678, ScanTime: ... }             │
+│         │                                                        │
+│         ▼                                                        │
+│   2. Query Changed Objects Since Watermark                       │
+│         │   LDAP Filter: (uSNChanged>=12345678)                 │
+│         │   Fallback: (whenChanged>=20240104...)                │
+│         │                                                        │
+│         ▼                                                        │
+│   3. Execute Rules on Changed Objects                            │
+│         │                                                        │
+│         ▼                                                        │
+│   4. Merge with Baseline Results                                 │
+│         │   - Keep unchanged findings from baseline              │
+│         │   - Update findings for changed objects                │
+│         │   - Add new findings                                   │
+│         │                                                        │
+│         ▼                                                        │
+│   5. Save New Watermark for Next Scan                            │
+│         │   { HighestUSN: 12345999, ScanTime: now }             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### USN (Update Sequence Number)
+
+AD-Scout uses the **USN** attribute as the primary change detection mechanism:
+
+- Each AD object has a `uSNChanged` attribute updated on every modification
+- The domain controller tracks `highestCommittedUSN` in RootDSE
+- Querying `(uSNChanged>={watermark})` returns only modified objects
+
+If USN is unavailable, falls back to `whenChanged` timestamp filtering.
+
+### Usage
+
+```powershell
+# Full scan (establishes baseline)
+Invoke-ADScoutScan | Export-ADScoutReport -Format HTML -Path baseline.html
+
+# Incremental scan (only changed objects)
+Invoke-ADScoutScan -Incremental
+
+# Incremental within engagement context
+Invoke-ADScoutScan -Incremental -EngagementId 'Q1-2024-Audit'
+
+# Force incremental from specific baseline
+Invoke-ADScoutScan -Incremental -BaselinePath ~/.adscout/sessions/20240101-090000
+```
+
+### Watermark Storage
+
+```
+~/.adscout/sessions/{session-id}/
+├── results.json       # Scan results
+├── state.json         # Status information
+├── progress.json      # Resume checkpoint
+└── watermark.json     # Incremental scan watermark
+    │
+    └── {
+          "Domain": "contoso.com",
+          "ScanTime": "2024-01-04T14:30:22Z",
+          "HighestUSN": 12345678,
+          "ObjectCount": 50000,
+          "ScanType": "Full"
+        }
+```
+
+### Incremental Scan Output
+
+When running an incremental scan, AD-Scout provides a summary showing:
+
+```
+Incremental Scan Summary:
+  Baseline: 2024-01-03T10:00:00Z
+  Score Change: 85 -> 78 (-7)
+  New Findings: 2
+  Resolved: 5
+  Changed: 3
+```
+
+### Helper Functions
+
+| Function | Purpose |
+|----------|---------|
+| `Get-ADScoutScanWatermark` | Retrieve previous scan watermark |
+| `Save-ADScoutScanWatermark` | Store watermark after scan |
+| `Get-ADScoutHighestUSN` | Query current DC's highest USN |
+| `Get-ADScoutChangedObjects` | Fetch objects changed since watermark |
+| `Merge-ADScoutIncrementalResults` | Combine incremental with baseline |
+| `Test-ADScoutIncrementalAvailable` | Check if incremental is possible |
+| `Get-ADScoutIncrementalSummary` | Generate change summary |
+
+### When to Use Full vs Incremental
+
+| Scenario | Recommended |
+|----------|-------------|
+| First scan of a domain | Full |
+| Daily monitoring | Incremental |
+| After major AD changes | Full |
+| Post-remediation verification | Incremental |
+| Watermark older than 7 days | Full (auto-fallback) |
+| Different domain controller | Full |
+
+## SIEM Integrations
+
+### Reporters
+
+| Reporter | Target | Format |
+|----------|--------|--------|
+| `Export-ADScoutElasticsearch` | Elasticsearch/OpenSearch | NDJSON with optional ECS |
+| `Export-ADScoutSplunk` | Splunk HEC | JSON with optional CIM |
+| `Export-ADScoutSentinel` | Azure Log Analytics | Data Collector API |
+
+### Export Flow
+
+```
+Results → Transform to target schema → Batch → Send via API
+            │
+            ├── ECS (Elastic Common Schema)
+            ├── CIM (Splunk Common Information Model)
+            └── Custom (Log Analytics)
+```
+
+## Engagement Management
+
+Engagements provide persistent assessment contexts:
+
+```
+~/.adscout/engagements/{engagement-id}/
+├── engagement.json       # Metadata, status, tags
+├── sessions/             # Scan sessions (disk-first storage)
+├── baselines/            # Baseline snapshots
+│   └── current.json
+├── exceptions/           # Engagement-scoped exceptions
+└── reports/              # Generated reports
+```
+
+### Engagement Lifecycle
+
+```
+New-ADScoutEngagement → Invoke-ADScoutEngagementScan → Set-ADScoutEngagement -Status Completed
+         │                        │
+         ▼                        ▼
+    Creates folder           Saves to engagement/sessions/
+    structure                with baseline comparison
+```
+
+## Exception Management
+
+Exceptions suppress specific findings with audit trails:
+
+### Exception Types
+
+| Type | Scope |
+|------|-------|
+| Rule | All findings for a rule ID |
+| Object | Specific AD objects (by SamAccountName/DN) |
+| Category | All rules in a category |
+
+### Exception Storage
+
+```json
+{
+  "Id": "abc12345",
+  "Type": "Object",
+  "RuleId": "S-PwdNeverExpires",
+  "ObjectIdentity": ["svc_backup", "svc_monitoring"],
+  "Justification": "Service accounts managed by CyberArk",
+  "ApprovedBy": "security@contoso.com",
+  "ExpirationDate": "2025-01-04T00:00:00Z",
+  "TicketReference": "CHG0012345",
+  "AuditLog": [
+    { "Action": "Created", "Timestamp": "...", "User": "..." },
+    { "Action": "Modified", "Timestamp": "...", "Changes": [...] }
+  ]
+}
+```
+
 ## Security Considerations
 
 1. **No credential storage**: Use secure credential methods
@@ -525,3 +864,5 @@ tests/
 3. **Output security**: Reports contain sensitive data
 4. **Input validation**: Validate all user inputs
 5. **Dependency minimization**: Reduce attack surface
+6. **Session data protection**: Results contain sensitive AD information
+7. **Exception audit trails**: All changes are logged with user/timestamp
