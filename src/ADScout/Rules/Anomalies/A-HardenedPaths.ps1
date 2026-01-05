@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'Anomalies'
     Title       = 'Hardened UNC Paths Not Configured'
-    Description = 'Detects when Hardened UNC Paths are not configured for SYSVOL and NETLOGON shares. Without this configuration, attackers can perform man-in-the-middle attacks to modify Group Policy or logon scripts in transit.'
+    Description = 'Detects when Hardened UNC Paths are not configured for SYSVOL and NETLOGON shares. Checks both GPO enforcement AND DC registry settings. Without this configuration, attackers can perform man-in-the-middle attacks to modify Group Policy or logon scripts in transit.'
     Severity    = 'High'
     Weight      = 30
-    DataSource  = 'GPOs'
+    DataSource  = 'GPOs,DomainControllers'
 
     References  = @(
         @{ Title = 'MS15-011 / MS15-014'; Url = 'https://docs.microsoft.com/en-us/security-updates/securitybulletins/2015/ms15-011' }
@@ -49,8 +49,11 @@
             }
         )
 
-        $hardenedPathsConfigured = $false
-        $partialConfiguration = $false
+        # ========================================================================
+        # BELT: Check GPO enforcement for Hardened UNC Paths
+        # ========================================================================
+        $gpoEnforcesHardenedPaths = $false
+        $gpoPartialConfiguration = $false
 
         try {
             # Check GPOs for hardened path configuration
@@ -61,7 +64,7 @@
                 if ($gpo.RegistrySettings) {
                     foreach ($regSetting in $gpo.RegistrySettings) {
                         if ($regSetting.KeyPath -match 'Policies\\Microsoft\\Windows\\NetworkProvider\\HardenedPaths') {
-                            $hardenedPathsConfigured = $true
+                            $gpoEnforcesHardenedPaths = $true
 
                             # Check if SYSVOL and NETLOGON are properly configured
                             foreach ($req in $requiredPaths) {
@@ -71,7 +74,7 @@
                                 }
 
                                 if (-not $found) {
-                                    $partialConfiguration = $true
+                                    $gpoPartialConfiguration = $true
                                 }
                             }
                         }
@@ -84,35 +87,38 @@
                         Where-Object { $_.Name -match 'NetworkProvider|HardenedPaths' }
 
                     if ($networkProvider) {
-                        $hardenedPathsConfigured = $true
+                        $gpoEnforcesHardenedPaths = $true
                     }
                 }
             }
 
-            # If not found via GPO data, check registry directly on DCs (if available)
-            if (-not $hardenedPathsConfigured) {
-                # This would require remote registry access
-                # For now, report as not configured if not found in GPO data
-
+            # Report missing GPO enforcement
+            if (-not $gpoEnforcesHardenedPaths) {
                 $findings += [PSCustomObject]@{
+                    ObjectType          = 'GPO Policy'
                     Setting             = 'Hardened UNC Paths'
-                    Status              = 'Not Configured'
+                    Source              = 'Domain-wide'
+                    Status              = 'No GPO Enforces Hardened Paths'
                     RequiredPaths       = '\\*\SYSVOL, \\*\NETLOGON'
                     RequiredSettings    = 'RequireMutualAuthentication=1, RequireIntegrity=1'
                     Severity            = 'High'
                     Risk                = 'SMB relay attacks can modify Group Policy in transit'
                     Impact              = 'Attacker can inject malicious settings into GPO during download'
                     CVE                 = 'MS15-011, MS15-014'
+                    ConfigSource        = 'Missing GPO'
                 }
-            } elseif ($partialConfiguration) {
+            } elseif ($gpoPartialConfiguration) {
                 $findings += [PSCustomObject]@{
+                    ObjectType          = 'GPO Policy'
                     Setting             = 'Hardened UNC Paths'
-                    Status              = 'Partially Configured'
+                    Source              = 'Domain-wide'
+                    Status              = 'Partially Configured in GPO'
                     RequiredPaths       = '\\*\SYSVOL, \\*\NETLOGON'
                     RequiredSettings    = 'RequireMutualAuthentication=1, RequireIntegrity=1'
                     Severity            = 'Medium'
                     Risk                = 'Some UNC paths may not be protected'
                     Impact              = 'Incomplete protection against SMB relay'
+                    ConfigSource        = 'Partial GPO'
                 }
             }
 
@@ -120,16 +126,88 @@
             Write-Verbose "A-HardenedPaths: Error checking GPO configuration - $_"
         }
 
-        # If we couldn't determine configuration, report as unknown
-        if ($findings.Count -eq 0 -and -not $hardenedPathsConfigured) {
-            $findings += [PSCustomObject]@{
-                Setting             = 'Hardened UNC Paths'
-                Status              = 'Not Detected in GPO'
-                RequiredPaths       = '\\*\SYSVOL, \\*\NETLOGON'
-                RequiredSettings    = 'RequireMutualAuthentication=1, RequireIntegrity=1'
-                Severity            = 'High'
-                Risk                = 'Configuration not found - manual verification required'
-                Impact              = 'SMB relay attacks may be possible against SYSVOL/NETLOGON'
+        # ========================================================================
+        # SUSPENDERS: Check actual DC registry for Hardened UNC Paths
+        # ========================================================================
+        if ($Data.DomainControllers) {
+            foreach ($dc in $Data.DomainControllers) {
+                $dcName = $dc.Name
+                if (-not $dcName) { $dcName = $dc.DnsHostName }
+                if (-not $dcName) { continue }
+
+                try {
+                    $hardenedPathSettings = Invoke-Command -ComputerName $dcName -ScriptBlock {
+                        $result = @{
+                            HasHardenedPaths = $false
+                            SYSVOLConfigured = $false
+                            NETLOGONConfigured = $false
+                            SYSVOLValue = $null
+                            NETLOGONValue = $null
+                        }
+
+                        $hardenedPathsKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider\HardenedPaths'
+
+                        if (Test-Path $hardenedPathsKey) {
+                            $result.HasHardenedPaths = $true
+                            $values = Get-ItemProperty -Path $hardenedPathsKey -ErrorAction SilentlyContinue
+
+                            # Check SYSVOL
+                            $sysvolValue = $values.PSObject.Properties | Where-Object { $_.Name -like '*SYSVOL*' }
+                            if ($sysvolValue) {
+                                $result.SYSVOLValue = $sysvolValue.Value
+                                if ($sysvolValue.Value -match 'RequireMutualAuthentication=1' -and
+                                    $sysvolValue.Value -match 'RequireIntegrity=1') {
+                                    $result.SYSVOLConfigured = $true
+                                }
+                            }
+
+                            # Check NETLOGON
+                            $netlogonValue = $values.PSObject.Properties | Where-Object { $_.Name -like '*NETLOGON*' }
+                            if ($netlogonValue) {
+                                $result.NETLOGONValue = $netlogonValue.Value
+                                if ($netlogonValue.Value -match 'RequireMutualAuthentication=1' -and
+                                    $netlogonValue.Value -match 'RequireIntegrity=1') {
+                                    $result.NETLOGONConfigured = $true
+                                }
+                            }
+                        }
+
+                        return $result
+                    } -ErrorAction SilentlyContinue
+
+                    $issues = @()
+
+                    if (-not $hardenedPathSettings.HasHardenedPaths) {
+                        $issues += 'Hardened UNC Paths registry key not present'
+                    } else {
+                        if (-not $hardenedPathSettings.SYSVOLConfigured) {
+                            $issues += "SYSVOL not properly hardened (Value: $($hardenedPathSettings.SYSVOLValue))"
+                        }
+                        if (-not $hardenedPathSettings.NETLOGONConfigured) {
+                            $issues += "NETLOGON not properly hardened (Value: $($hardenedPathSettings.NETLOGONValue))"
+                        }
+                    }
+
+                    if ($issues.Count -gt 0) {
+                        $findings += [PSCustomObject]@{
+                            ObjectType          = 'DC Configuration'
+                            Setting             = 'Hardened UNC Paths'
+                            Source              = $dcName
+                            Status              = 'Not Properly Configured'
+                            RequiredPaths       = '\\*\SYSVOL, \\*\NETLOGON'
+                            RequiredSettings    = 'RequireMutualAuthentication=1, RequireIntegrity=1'
+                            Severity            = 'High'
+                            Risk                = ($issues -join '; ')
+                            Impact              = 'SMB relay attacks possible against this DC'
+                            CVE                 = 'MS15-011, MS15-014'
+                            ConfigSource        = 'Registry'
+                            DistinguishedName   = $dc.DistinguishedName
+                        }
+                    }
+
+                } catch {
+                    Write-Verbose "A-HardenedPaths: Could not check DC $dcName - $_"
+                }
             }
         }
 

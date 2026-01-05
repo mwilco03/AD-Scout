@@ -3,10 +3,10 @@
     Version     = '1.0.0'
     Category    = 'Anomalies'
     Title       = 'LLMNR and NetBIOS-NS Not Disabled'
-    Description = 'Detects when LLMNR (Link-Local Multicast Name Resolution) and NetBIOS Name Service are not disabled via Group Policy. These legacy name resolution protocols are commonly exploited for credential theft via poisoning attacks.'
+    Description = 'Detects when LLMNR (Link-Local Multicast Name Resolution) and NetBIOS Name Service are not disabled. Checks both GPO enforcement AND DC registry settings. These legacy name resolution protocols are commonly exploited for credential theft via poisoning attacks.'
     Severity    = 'High'
     Weight      = 30
-    DataSource  = 'GPOs'
+    DataSource  = 'GPOs,DomainControllers'
 
     References  = @(
         @{ Title = 'LLMNR/NBT-NS Poisoning'; Url = 'https://attack.mitre.org/techniques/T1557/001/' }
@@ -33,12 +33,16 @@
 
         $findings = @()
 
-        $llmnrDisabled = $false
-        $netbiosDisabled = $false
-        $mdnsDisabled = $false
+        # ========================================================================
+        # BELT: Check GPO enforcement for LLMNR/NetBIOS/mDNS
+        # ========================================================================
+        $gpoLLMNRDisabled = $false
+        $gpoNetBIOSDisabled = $false
+        $gpoMDNSDisabled = $false
 
         # Registry paths
         # LLMNR: HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast = 0
+        # mDNS: HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMDNS = 0
         # NetBIOS: Configured per network adapter or via DHCP
 
         try {
@@ -50,14 +54,22 @@
                         if ($regSetting.KeyPath -match 'Windows NT\\DNSClient' -and
                             $regSetting.ValueName -eq 'EnableMulticast' -and
                             $regSetting.Value -eq 0) {
-                            $llmnrDisabled = $true
+                            $gpoLLMNRDisabled = $true
                         }
 
                         # Check for mDNS disable
                         if ($regSetting.KeyPath -match 'Windows NT\\DNSClient' -and
                             $regSetting.ValueName -eq 'EnableMDNS' -and
                             $regSetting.Value -eq 0) {
-                            $mdnsDisabled = $true
+                            $gpoMDNSDisabled = $true
+                        }
+
+                        # NetBIOS over TCP/IP setting
+                        if ($regSetting.KeyPath -match 'NetBT\\Parameters' -and
+                            $regSetting.ValueName -match 'NetBiosOptions|NodeType') {
+                            if ($regSetting.Value -eq 2) {  # 2 = Disable NetBIOS over TCP/IP
+                                $gpoNetBIOSDisabled = $true
+                            }
                         }
                     }
                 }
@@ -70,31 +82,18 @@
                     }
 
                     if ($llmnrPolicy -and $llmnrPolicy.State -eq 'Enabled') {
-                        $llmnrDisabled = $true
+                        $gpoLLMNRDisabled = $true
                     }
                 }
             }
 
-            # Check for NetBIOS configuration in GPO
-            foreach ($gpo in $Data.GPOs) {
-                if ($gpo.RegistrySettings) {
-                    foreach ($regSetting in $gpo.RegistrySettings) {
-                        # NetBIOS over TCP/IP setting
-                        if ($regSetting.KeyPath -match 'NetBT\\Parameters' -and
-                            $regSetting.ValueName -match 'NetBiosOptions|NodeType') {
-                            if ($regSetting.Value -eq 2) {  # 2 = Disable NetBIOS over TCP/IP
-                                $netbiosDisabled = $true
-                            }
-                        }
-                    }
-                }
-            }
-
-            # Report findings
-            if (-not $llmnrDisabled) {
+            # Report missing GPO enforcement
+            if (-not $gpoLLMNRDisabled) {
                 $findings += [PSCustomObject]@{
+                    ObjectType          = 'GPO Policy'
                     Protocol            = 'LLMNR'
-                    Status              = 'Not Disabled'
+                    Source              = 'Domain-wide'
+                    Status              = 'No GPO Disables LLMNR'
                     GPOSetting          = 'Turn off multicast name resolution'
                     RegistryPath        = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast'
                     RequiredValue       = '0'
@@ -102,36 +101,153 @@
                     Risk                = 'LLMNR poisoning enables credential capture'
                     AttackTool          = 'Responder, Inveigh'
                     Impact              = 'Attacker on local network can capture NTLMv2 hashes'
+                    ConfigSource        = 'Missing GPO'
                 }
             }
 
-            if (-not $netbiosDisabled) {
+            if (-not $gpoNetBIOSDisabled) {
                 $findings += [PSCustomObject]@{
+                    ObjectType          = 'GPO Policy'
                     Protocol            = 'NetBIOS-NS'
-                    Status              = 'Not Disabled'
-                    GPOSetting          = 'Configure NetBIOS over TCP/IP via DHCP or adapter settings'
+                    Source              = 'Domain-wide'
+                    Status              = 'No GPO Disables NetBIOS'
+                    GPOSetting          = 'Configure NetBIOS over TCP/IP via DHCP or registry'
                     Severity            = 'High'
                     Risk                = 'NetBIOS name poisoning enables credential capture'
                     AttackTool          = 'Responder, Inveigh'
                     Impact              = 'Attacker on local network can capture NTLMv2 hashes'
+                    ConfigSource        = 'Missing GPO'
                 }
             }
 
-            if (-not $mdnsDisabled) {
+            if (-not $gpoMDNSDisabled) {
                 $findings += [PSCustomObject]@{
+                    ObjectType          = 'GPO Policy'
                     Protocol            = 'mDNS'
-                    Status              = 'Not Disabled'
+                    Source              = 'Domain-wide'
+                    Status              = 'No GPO Disables mDNS'
                     GPOSetting          = 'EnableMDNS registry value'
                     RegistryPath        = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMDNS'
                     RequiredValue       = '0'
                     Severity            = 'Medium'
                     Risk                = 'mDNS can be poisoned for credential capture'
                     Impact              = 'Similar attack vector to LLMNR'
+                    ConfigSource        = 'Missing GPO'
                 }
             }
 
         } catch {
-            Write-Verbose "A-NoGPOLLMNR: Error - $_"
+            Write-Verbose "A-NoGPOLLMNR: Error checking GPO - $_"
+        }
+
+        # ========================================================================
+        # SUSPENDERS: Check actual DC registry for LLMNR/NetBIOS/mDNS
+        # ========================================================================
+        if ($Data.DomainControllers) {
+            foreach ($dc in $Data.DomainControllers) {
+                $dcName = $dc.Name
+                if (-not $dcName) { $dcName = $dc.DnsHostName }
+                if (-not $dcName) { continue }
+
+                try {
+                    $protocolSettings = Invoke-Command -ComputerName $dcName -ScriptBlock {
+                        $result = @{
+                            LLMNREnabled = $true  # Default is enabled
+                            MDNSEnabled = $true   # Default is enabled
+                            NetBIOSEnabled = $true  # Default depends on adapter
+                            EnableMulticastValue = $null
+                            EnableMDNSValue = $null
+                        }
+
+                        $dnsClientPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'
+
+                        # Check LLMNR (EnableMulticast = 0 means disabled)
+                        if (Test-Path $dnsClientPath) {
+                            $multicast = Get-ItemProperty -Path $dnsClientPath -Name 'EnableMulticast' -ErrorAction SilentlyContinue
+                            if ($null -ne $multicast.EnableMulticast) {
+                                $result.EnableMulticastValue = $multicast.EnableMulticast
+                                $result.LLMNREnabled = ($multicast.EnableMulticast -ne 0)
+                            }
+
+                            # Check mDNS (EnableMDNS = 0 means disabled)
+                            $mdns = Get-ItemProperty -Path $dnsClientPath -Name 'EnableMDNS' -ErrorAction SilentlyContinue
+                            if ($null -ne $mdns.EnableMDNS) {
+                                $result.EnableMDNSValue = $mdns.EnableMDNS
+                                $result.MDNSEnabled = ($mdns.EnableMDNS -ne 0)
+                            }
+                        }
+
+                        # Check NetBIOS on active adapters
+                        # NetbiosOptions: 0 = Default (DHCP), 1 = Enable, 2 = Disable
+                        $netbtPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces'
+                        if (Test-Path $netbtPath) {
+                            $interfaces = Get-ChildItem -Path $netbtPath -ErrorAction SilentlyContinue
+                            $allDisabled = $true
+                            foreach ($iface in $interfaces) {
+                                $netbiosOpt = Get-ItemProperty -Path $iface.PSPath -Name 'NetbiosOptions' -ErrorAction SilentlyContinue
+                                if ($null -eq $netbiosOpt.NetbiosOptions -or $netbiosOpt.NetbiosOptions -ne 2) {
+                                    $allDisabled = $false
+                                    break
+                                }
+                            }
+                            $result.NetBIOSEnabled = -not $allDisabled
+                        }
+
+                        return $result
+                    } -ErrorAction SilentlyContinue
+
+                    # Report DC-specific findings
+                    if ($protocolSettings.LLMNREnabled) {
+                        $findings += [PSCustomObject]@{
+                            ObjectType          = 'DC Configuration'
+                            Protocol            = 'LLMNR'
+                            Source              = $dcName
+                            Status              = 'Enabled on DC'
+                            CurrentValue        = "EnableMulticast = $($protocolSettings.EnableMulticastValue)"
+                            Severity            = 'High'
+                            Risk                = 'DC vulnerable to LLMNR poisoning attacks'
+                            AttackTool          = 'Responder, Inveigh'
+                            Impact              = 'Attacker can capture DC credentials'
+                            ConfigSource        = 'Registry'
+                            DistinguishedName   = $dc.DistinguishedName
+                        }
+                    }
+
+                    if ($protocolSettings.MDNSEnabled) {
+                        $findings += [PSCustomObject]@{
+                            ObjectType          = 'DC Configuration'
+                            Protocol            = 'mDNS'
+                            Source              = $dcName
+                            Status              = 'Enabled on DC'
+                            CurrentValue        = "EnableMDNS = $($protocolSettings.EnableMDNSValue)"
+                            Severity            = 'Medium'
+                            Risk                = 'DC vulnerable to mDNS poisoning attacks'
+                            AttackTool          = 'Responder, Inveigh'
+                            Impact              = 'Similar attack vector to LLMNR'
+                            ConfigSource        = 'Registry'
+                            DistinguishedName   = $dc.DistinguishedName
+                        }
+                    }
+
+                    if ($protocolSettings.NetBIOSEnabled) {
+                        $findings += [PSCustomObject]@{
+                            ObjectType          = 'DC Configuration'
+                            Protocol            = 'NetBIOS-NS'
+                            Source              = $dcName
+                            Status              = 'Enabled on DC'
+                            Severity            = 'High'
+                            Risk                = 'DC vulnerable to NetBIOS name poisoning'
+                            AttackTool          = 'Responder, Inveigh'
+                            Impact              = 'Attacker can capture DC credentials'
+                            ConfigSource        = 'Registry'
+                            DistinguishedName   = $dc.DistinguishedName
+                        }
+                    }
+
+                } catch {
+                    Write-Verbose "A-NoGPOLLMNR: Could not check DC $dcName - $_"
+                }
+            }
         }
 
         return $findings
