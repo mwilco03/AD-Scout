@@ -57,7 +57,7 @@ function Invoke-ADScoutEDRCommand {
 
     .PARAMETER Session
         Named session to use for MSSP multi-tenant environments. If not specified,
-        uses the active session.
+        uses the active session. Accepts pipeline input by property name (Name alias).
 
     .EXAMPLE
         Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo' -TargetHost 'DC01.contoso.com'
@@ -80,6 +80,13 @@ function Invoke-ADScoutEDRCommand {
         Connect-ADScoutEDR -Provider PSFalcon -Name 'ClientB' -ClientId $idB -ClientSecret $secretB
         # Now in multi-session mode - only templates allowed
         Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo' -TargetHost 'DC01' -Session 'ClientA'
+
+    .EXAMPLE
+        # Pipeline from Connect with -PassThru
+        Connect-ADScoutEDR -Provider PSFalcon -PassThru |
+            ForEach-Object { Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo' -TargetHost 'DC01' -Session $_.Name }
+
+        Connects and immediately executes a command via pipeline.
 
     .OUTPUTS
         PSCustomObject with results per host, or raw JSON if -Raw specified.
@@ -123,7 +130,8 @@ function Invoke-ADScoutEDRCommand {
         [Parameter()]
         [switch]$Raw,
 
-        [Parameter()]
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Alias('Name')]
         [string]$Session
     )
 

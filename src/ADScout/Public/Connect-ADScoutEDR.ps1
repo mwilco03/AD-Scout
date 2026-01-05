@@ -84,8 +84,12 @@ function Connect-ADScoutEDR {
 
         Connects using a credential object (username = ClientId, password = ClientSecret).
 
+    .PARAMETER PassThru
+        Returns the connection object instead of boolean. Enables pipeline scenarios:
+        Connect-ADScoutEDR ... -PassThru | Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo'
+
     .OUTPUTS
-        Boolean. Returns $true if connection successful, $false otherwise.
+        Boolean by default. With -PassThru, returns ADScout.EDR.Connection object for pipeline use.
 
     .NOTES
         Prerequisites vary by provider:
@@ -133,7 +137,10 @@ function Connect-ADScoutEDR {
         [switch]$UseExistingToken,
 
         [Parameter()]
-        [bool]$SetActive = $true
+        [bool]$SetActive = $true,
+
+        [Parameter()]
+        [switch]$PassThru
     )
 
     # Initialize session registry if needed
@@ -144,14 +151,26 @@ function Connect-ADScoutEDR {
     # Normalize provider name
     if ($Provider -eq 'MDE') { $Provider = 'DefenderATP' }
 
-    # Default session name to provider if not specified
+    # Auto-generate unique session name if not specified or if name conflicts
     if (-not $Name) {
-        $Name = $Provider
+        $baseName = $Provider
+        if ($script:ADScoutEDRSessions.ContainsKey($baseName)) {
+            # Generate unique name: Provider-001, Provider-002, etc.
+            $counter = 1
+            do {
+                $Name = "{0}-{1:D3}" -f $baseName, $counter
+                $counter++
+            } while ($script:ADScoutEDRSessions.ContainsKey($Name) -and $counter -lt 1000)
+        }
+        else {
+            $Name = $baseName
+        }
     }
 
-    # Check if session name already exists
+    # Check if session name already exists (for explicit names)
     if ($script:ADScoutEDRSessions.ContainsKey($Name)) {
         Write-Warning "Session '$Name' already exists. Use Disconnect-ADScoutEDR -Name '$Name' first, or choose a different name."
+        if ($PassThru) { return $null }
         return $false
     }
 
@@ -160,6 +179,7 @@ function Connect-ADScoutEDR {
 
     if (-not $providerTemplate) {
         Write-Error "EDR Provider '$Provider' is not registered. Ensure the provider module is loaded."
+        if ($PassThru) { return $null }
         return $false
     }
 
@@ -198,6 +218,7 @@ function Connect-ADScoutEDR {
         'DefenderATP' {
             if (-not $TenantId -and -not $UseExistingToken) {
                 Write-Error "TenantId is required for Microsoft Defender for Endpoint"
+                if ($PassThru) { return $null }
                 return $false
             }
             $connectionParams.TenantId = $TenantId
@@ -231,15 +252,31 @@ function Connect-ADScoutEDR {
                 $script:ADScoutEDRProvider = $Provider
             }
 
+            # Return connection object for pipeline or boolean
+            if ($PassThru) {
+                return [PSCustomObject]@{
+                    PSTypeName   = 'ADScout.EDR.Connection'
+                    Name         = $Name
+                    Provider     = $Provider
+                    Cloud        = $Cloud
+                    MemberCid    = $MemberCid
+                    TenantId     = $TenantId
+                    IsActive     = $SetActive
+                    IsConnected  = $true
+                    ConnectedAt  = $script:ADScoutEDRSessions[$Name].ConnectedAt
+                }
+            }
             return $true
         }
         else {
             Write-Warning "Connection to $Provider returned false"
+            if ($PassThru) { return $null }
             return $false
         }
     }
     catch {
         Write-Error "Failed to connect to $Provider`: $_"
+        if ($PassThru) { return $null }
         return $false
     }
 }
@@ -252,10 +289,11 @@ function Disconnect-ADScoutEDR {
     .DESCRIPTION
         Terminates the EDR session and clears cached connection state.
         Can disconnect a specific named session or all sessions.
+        Supports pipeline input from Get-ADScoutEDRConnection.
 
     .PARAMETER Name
         Name of the session to disconnect. If not specified, disconnects
-        the currently active session.
+        the currently active session. Accepts pipeline input by property name.
 
     .PARAMETER All
         Disconnect all active EDR sessions.
@@ -274,21 +312,34 @@ function Disconnect-ADScoutEDR {
         Disconnect-ADScoutEDR -All
 
         Disconnects all EDR sessions.
+
+    .EXAMPLE
+        Get-ADScoutEDRConnection | Disconnect-ADScoutEDR
+
+        Disconnects all sessions via pipeline.
+
+    .EXAMPLE
+        Get-ADScoutEDRConnection | Where-Object { $_.Provider -eq 'PSFalcon' } | Disconnect-ADScoutEDR
+
+        Disconnects only PSFalcon sessions via pipeline.
     #>
     [CmdletBinding(DefaultParameterSetName = 'Single')]
     param(
-        [Parameter(ParameterSetName = 'Single')]
+        [Parameter(ParameterSetName = 'Single', ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [string]$Name,
 
         [Parameter(ParameterSetName = 'All')]
         [switch]$All
     )
 
-    if (-not $script:ADScoutEDRSessions) {
-        $script:ADScoutEDRSessions = @{}
+    begin {
+        if (-not $script:ADScoutEDRSessions) {
+            $script:ADScoutEDRSessions = @{}
+        }
     }
 
-    if ($All) {
+    process {
+        if ($All) {
         # Disconnect all sessions
         foreach ($sessionName in @($script:ADScoutEDRSessions.Keys)) {
             $session = $script:ADScoutEDRSessions[$sessionName]
@@ -352,6 +403,7 @@ function Disconnect-ADScoutEDR {
             Write-Warning "Session '$targetSession' not found"
         }
     }
+    }
 }
 
 function Switch-ADScoutEDRConnection {
@@ -362,9 +414,10 @@ function Switch-ADScoutEDRConnection {
     .DESCRIPTION
         When multiple EDR sessions are connected (e.g., multiple MSSP tenants),
         use this to switch which session is used by default for commands.
+        Supports pipeline input from Get-ADScoutEDRConnection.
 
     .PARAMETER Name
-        Name of the session to make active.
+        Name of the session to make active. Accepts pipeline input by property name.
 
     .EXAMPLE
         # Connect to multiple MSSP tenants
@@ -381,10 +434,15 @@ function Switch-ADScoutEDRConnection {
     .EXAMPLE
         Get-ADScoutEDRConnection | Format-Table Name, Provider, ConnectedAt
         Switch-ADScoutEDRConnection -Name 'MSSP-TenantX'
+
+    .EXAMPLE
+        Get-ADScoutEDRConnection -Name 'ClientB' | Switch-ADScoutEDRConnection
+
+        Switches to a specific session via pipeline.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, Position = 0)]
+        [Parameter(Mandatory, Position = 0, ValueFromPipelineByPropertyName)]
         [string]$Name
     )
 
@@ -518,9 +576,11 @@ function Test-ADScoutEDRConnection {
 
     .DESCRIPTION
         Returns $true if connected to an EDR platform with a valid session.
+        Supports pipeline input from Get-ADScoutEDRConnection.
 
     .PARAMETER Name
         Test a specific named session. If not specified, tests the active session.
+        Accepts pipeline input by property name.
 
     .EXAMPLE
         if (Test-ADScoutEDRConnection) {
@@ -529,11 +589,16 @@ function Test-ADScoutEDRConnection {
 
     .EXAMPLE
         Test-ADScoutEDRConnection -Name 'MSSP-ClientA'
+
+    .EXAMPLE
+        Get-ADScoutEDRConnection | Test-ADScoutEDRConnection
+
+        Tests all connections via pipeline.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
     param(
-        [Parameter()]
+        [Parameter(ValueFromPipelineByPropertyName)]
         [string]$Name
     )
 
