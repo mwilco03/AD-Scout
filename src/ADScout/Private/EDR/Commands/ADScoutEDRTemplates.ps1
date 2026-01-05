@@ -2,13 +2,17 @@
 
 <#
 .SYNOPSIS
-    Pre-canned execution templates for AD queries via EDR platforms.
+    Pre-canned READ-ONLY execution templates for AD queries via EDR platforms.
 
 .DESCRIPTION
     Provides ready-to-use command templates for common Active Directory
     security reconnaissance tasks. These templates are designed to work
     through EDR platforms like CrowdStrike Falcon, allowing security
     professionals to gather AD data without direct admin access.
+
+    SECURITY: All templates in this file MUST be read-only reconnaissance
+    operations. Write operations are NOT permitted through EDR execution.
+    Every template must have IsWriteOperation = $false.
 
 .NOTES
     Author: AD-Scout Contributors
@@ -23,8 +27,17 @@ function Register-ADScoutEDRTemplate {
     .SYNOPSIS
         Registers a pre-canned EDR execution template.
 
+    .DESCRIPTION
+        SECURITY: All templates must be marked with IsWriteOperation = $false.
+        Templates marked as write operations will be rejected.
+
     .PARAMETER Template
-        Hashtable containing template definition.
+        Hashtable containing template definition. Must include:
+        - Id: Unique template identifier
+        - Name: Human-readable name
+        - Category: Template category
+        - ScriptBlock: PowerShell code to execute
+        - IsWriteOperation: Must be $false (read-only enforcement)
     #>
     [CmdletBinding()]
     param(
@@ -33,15 +46,20 @@ function Register-ADScoutEDRTemplate {
     )
 
     # Validate required fields
-    $requiredFields = @('Id', 'Name', 'Category', 'ScriptBlock')
+    $requiredFields = @('Id', 'Name', 'Category', 'ScriptBlock', 'IsWriteOperation')
     foreach ($field in $requiredFields) {
         if (-not $Template.ContainsKey($field)) {
             throw "Template missing required field: $field"
         }
     }
 
+    # SECURITY: Reject write operation templates
+    if ($Template.IsWriteOperation -eq $true) {
+        throw "SECURITY: Cannot register template '$($Template.Id)' - write operations are not permitted. EDR execution is read-only."
+    }
+
     $script:EDRTemplates[$Template.Id] = $Template
-    Write-Verbose "Registered EDR Template: $($Template.Id)"
+    Write-Verbose "Registered EDR Template: $($Template.Id) (read-only)"
 }
 
 function Get-ADScoutEDRTemplate {
@@ -85,6 +103,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Domain Information'
     Category           = 'Reconnaissance'
     Description        = 'Retrieves basic domain information including forest, domain controllers, and functional levels.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 60
     OutputType         = 'JSON'
@@ -130,6 +149,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Domain Trusts'
     Category           = 'Reconnaissance'
     Description        = 'Enumerates all domain and forest trusts with their attributes.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 60
     OutputType         = 'JSON'
@@ -184,6 +204,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Privileged Group Members'
     Category           = 'PrivilegedAccounts'
     Description        = 'Enumerates members of high-privilege AD groups (Domain Admins, Enterprise Admins, etc.).'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -260,6 +281,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get AdminSDHolder Protected Objects'
     Category           = 'PrivilegedAccounts'
     Description        = 'Finds accounts with AdminCount=1 that are protected by AdminSDHolder.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -310,6 +332,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Service Principal Name Accounts'
     Category           = 'Kerberos'
     Description        = 'Finds user accounts with SPNs set (potential Kerberoasting targets).'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -361,6 +384,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get AS-REP Roastable Accounts'
     Category           = 'Kerberos'
     Description        = 'Finds accounts that do not require Kerberos pre-authentication.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -419,6 +443,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Unconstrained Delegation Accounts'
     Category           = 'Kerberos'
     Description        = 'Finds accounts trusted for unconstrained delegation.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -467,6 +492,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Constrained Delegation Configuration'
     Category           = 'Kerberos'
     Description        = 'Finds accounts with constrained delegation configured.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -515,6 +541,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Stale Computer Accounts'
     Category           = 'StaleObjects'
     Description        = 'Finds computer accounts that have not authenticated recently.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 180
     Parameters         = @{
@@ -580,6 +607,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Stale User Accounts'
     Category           = 'StaleObjects'
     Description        = 'Finds user accounts that have not authenticated recently.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 180
     Parameters         = @{
@@ -650,6 +678,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Domain Password Policy'
     Category           = 'PasswordPolicy'
     Description        = 'Retrieves the default domain password policy and any fine-grained policies.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 60
     OutputType         = 'JSON'
@@ -725,6 +754,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Accounts with Non-Expiring Passwords'
     Category           = 'PasswordPolicy'
     Description        = 'Finds user accounts configured with passwords that never expire.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -787,6 +817,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Group Policy Objects'
     Category           = 'GPO'
     Description        = 'Enumerates all Group Policy Objects and their links.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -871,6 +902,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Local Administrators'
     Category           = 'EndpointConfig'
     Description        = 'Enumerates members of the local Administrators group on the endpoint.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $true
     Timeout            = 60
     OutputType         = 'JSON'
@@ -908,6 +940,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Endpoint Security Configuration'
     Category           = 'EndpointConfig'
     Description        = 'Retrieves security-relevant configuration from the endpoint (firewall, AV, etc.).'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $true
     Timeout            = 120
     OutputType         = 'JSON'
@@ -1004,6 +1037,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Installed Software'
     Category           = 'EndpointConfig'
     Description        = 'Lists installed software with focus on security-relevant applications.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $false
     Timeout            = 120
     OutputType         = 'JSON'
@@ -1052,6 +1086,7 @@ Register-ADScoutEDRTemplate @{
     Name               = 'Get Scheduled Tasks'
     Category           = 'EndpointConfig'
     Description        = 'Enumerates scheduled tasks for persistence detection.'
+    IsWriteOperation   = $false  # SECURITY: Read-only reconnaissance
     RequiresElevation  = $true
     Timeout            = 120
     OutputType         = 'JSON'

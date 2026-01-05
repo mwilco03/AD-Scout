@@ -10,6 +10,10 @@
     domain controllers and endpoint configurations through EDR platforms
     like CrowdStrike Falcon, Carbon Black, Microsoft Defender, etc.
 
+    SECURITY: EDR execution is READ-ONLY by design. Only pre-approved
+    reconnaissance templates can be executed. Arbitrary script execution
+    and remediation actions are blocked to prevent unintended changes.
+
 .NOTES
     Author: AD-Scout Contributors
     License: MIT
@@ -26,6 +30,10 @@ class EDRProviderBase {
     [bool]$IsConnected = $false
     [hashtable]$ConnectionContext = @{}
 
+    # SECURITY: Read-only mode is ALWAYS enforced for EDR operations
+    # This cannot be disabled - reconnaissance only, no changes
+    [bool]$ReadOnlyMode = $true
+
     # Rate limiting and throttling
     [int]$MaxConcurrentCommands = 10
     [int]$CommandTimeoutSeconds = 300
@@ -37,6 +45,7 @@ class EDRProviderBase {
         $this.Name = 'Base'
         $this.Version = '1.0.0'
         $this.Description = 'Abstract EDR Provider Base Class'
+        $this.ReadOnlyMode = $true  # Always read-only
     }
 
     # Connect to the EDR platform
@@ -56,16 +65,23 @@ class EDRProviderBase {
     }
 
     # Execute a command on target host(s)
+    # INTERNAL USE ONLY - called by ExecuteTemplate after validation
     # Returns: Hashtable with results per host
     [hashtable] ExecuteCommand([string]$Command, [string[]]$TargetHosts, [hashtable]$Options) {
         throw "ExecuteCommand() must be implemented by derived class"
     }
 
-    # Execute a pre-canned command template
+    # Execute a pre-canned command template (PUBLIC API)
+    # Only allows execution of approved read-only templates
     [hashtable] ExecuteTemplate([string]$TemplateName, [string[]]$TargetHosts, [hashtable]$Parameters) {
         $template = Get-ADScoutEDRTemplate -Name $TemplateName
         if (-not $template) {
             throw "Template '$TemplateName' not found"
+        }
+
+        # SECURITY: Verify template is marked as read-only
+        if ($template.IsWriteOperation -eq $true) {
+            throw "SECURITY: Template '$TemplateName' is marked as a write operation and cannot be executed. EDR operations are read-only."
         }
 
         # Expand template with parameters
@@ -121,6 +137,7 @@ class EDRProviderBase {
             SupportsFileDownload = $false
             MaxScriptLength = 0
             SupportedOSPlatforms = @()
+            ReadOnlyMode = $true  # Always true
         }
     }
 }
@@ -128,6 +145,9 @@ class EDRProviderBase {
 # Registry for EDR providers
 $script:EDRProviders = @{}
 $script:ActiveEDRProvider = $null
+
+# SECURITY: Global read-only enforcement
+$script:ADScoutEDRReadOnlyMode = $true
 
 function Register-ADScoutEDRProvider {
     <#
@@ -242,4 +262,122 @@ function Set-ADScoutEDRProvider {
     }
 
     Write-Verbose "Active EDR Provider set to: $($script:ActiveEDRProvider.Name)"
+}
+
+function Test-ADScoutEDRCommandSafety {
+    <#
+    .SYNOPSIS
+        Validates that a command/template is safe for read-only execution.
+
+    .DESCRIPTION
+        SECURITY FUNCTION: Checks commands for potentially dangerous patterns
+        that could modify systems. This is a defense-in-depth measure.
+
+    .PARAMETER Command
+        The command string to validate.
+
+    .PARAMETER TemplateName
+        The template name to validate.
+
+    .OUTPUTS
+        Returns $true if safe, throws if unsafe.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(ParameterSetName = 'Command')]
+        [string]$Command,
+
+        [Parameter(ParameterSetName = 'Template')]
+        [string]$TemplateName
+    )
+
+    # Dangerous patterns that indicate write operations
+    $dangerousPatterns = @(
+        # PowerShell write cmdlets
+        'Set-AD',
+        'New-AD',
+        'Remove-AD',
+        'Add-AD',
+        'Enable-AD',
+        'Disable-AD',
+        'Unlock-AD',
+        'Reset-AD',
+        'Move-AD',
+        'Rename-AD',
+        'Set-Item',
+        'New-Item',
+        'Remove-Item',
+        'Set-Content',
+        'Add-Content',
+        'Clear-Content',
+        'Out-File',
+        'Set-Acl',
+        'Set-Service',
+        'Stop-Service',
+        'Start-Service',
+        'Restart-Service',
+        'Stop-Process',
+        'Start-Process',
+        'Invoke-Expression',
+        'Invoke-Command.*-ScriptBlock',  # Remote execution with scriptblock
+        'Start-Job',
+        'Register-ScheduledTask',
+        'Set-ScheduledTask',
+        'Unregister-ScheduledTask',
+        'New-LocalUser',
+        'Set-LocalUser',
+        'Remove-LocalUser',
+        'Add-LocalGroupMember',
+        'Remove-LocalGroupMember',
+        # Net commands
+        'net\s+user',
+        'net\s+localgroup.*\/add',
+        'net\s+localgroup.*\/delete',
+        # Registry modifications
+        'Set-ItemProperty',
+        'New-ItemProperty',
+        'Remove-ItemProperty',
+        'reg\s+add',
+        'reg\s+delete',
+        # Dangerous operations
+        'Format-',
+        'Clear-EventLog',
+        'Remove-EventLog',
+        'wevtutil\s+cl',
+        # File operations
+        'Copy-Item.*-Force',
+        'Move-Item',
+        'Rename-Item',
+        'del\s+',
+        'rm\s+',
+        'rmdir',
+        'erase\s+'
+    )
+
+    if ($TemplateName) {
+        $template = Get-ADScoutEDRTemplate -Name $TemplateName
+        if (-not $template) {
+            throw "Template '$TemplateName' not found"
+        }
+
+        # Check if template is explicitly marked as write operation
+        if ($template.IsWriteOperation -eq $true) {
+            throw "SECURITY: Template '$TemplateName' is marked as a write operation and cannot be executed via EDR."
+        }
+
+        $Command = $template.ScriptBlock
+    }
+
+    if (-not $Command) {
+        return $true
+    }
+
+    # Check for dangerous patterns
+    foreach ($pattern in $dangerousPatterns) {
+        if ($Command -match $pattern) {
+            throw "SECURITY: Command contains potentially dangerous pattern '$pattern'. EDR execution is read-only. Command blocked."
+        }
+    }
+
+    return $true
 }
