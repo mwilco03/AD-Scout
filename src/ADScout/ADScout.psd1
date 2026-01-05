@@ -48,6 +48,7 @@
         'Switch-ADScoutEDRConnection'
         'Get-ADScoutEDRConnection'
         'Invoke-ADScoutEDRCommand'
+        'Invoke-ADScoutEDRCollection'
         'Get-ADScoutEDRHost'
         'Get-ADScoutEDRCapabilities'
         'Get-ADScoutEDRProvider'

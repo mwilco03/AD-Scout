@@ -461,3 +461,289 @@ function Get-ADScoutEDRCapabilities {
         AdditionalCapabilities     = $capabilities
     }
 }
+
+function Invoke-ADScoutEDRCollection {
+    <#
+    .SYNOPSIS
+        Runs comprehensive AD/endpoint collection across multiple hosts with automatic batching.
+
+    .DESCRIPTION
+        "Just run it" - Automatically handles API rate limits and concurrent session
+        limits for each EDR provider. Batches hosts, manages queuing, tracks progress,
+        and consolidates results. No brain power required.
+
+        Provider Limits (handled automatically):
+        - CrowdStrike Falcon: 500 concurrent sessions, batches of 500
+        - Microsoft Defender: 25 concurrent sessions, batches of 25
+
+        The function will:
+        1. Query available hosts (or use provided list)
+        2. Auto-batch based on provider limits
+        3. Execute with progress tracking
+        4. Wait for completion with status updates
+        5. Consolidate and return all results
+
+    .PARAMETER Template
+        Collection template to run. Defaults to 'AD-FullRecon'.
+        Options: AD-FullRecon, EP-FullRecon, or any registered template.
+
+    .PARAMETER TargetHost
+        Specific hosts to target. If not provided, uses -Filter or all available hosts.
+
+    .PARAMETER Filter
+        Hashtable filter for host selection (Platform, Online, Hostname, OU).
+
+    .PARAMETER DomainControllersOnly
+        Only target domain controllers.
+
+    .PARAMETER MaxHosts
+        Maximum number of hosts to collect from. Default: 100.
+
+    .PARAMETER BatchSize
+        Override automatic batch size (use with caution).
+
+    .PARAMETER ThrottleDelaySeconds
+        Delay between batches. Default: auto-calculated based on provider.
+
+    .PARAMETER Session
+        Named EDR session to use.
+
+    .PARAMETER OutputPath
+        Export results to JSON file at this path.
+
+    .EXAMPLE
+        Invoke-ADScoutEDRCollection
+
+        Runs AD-FullRecon on all domain controllers (up to 100), auto-batched.
+
+    .EXAMPLE
+        Invoke-ADScoutEDRCollection -Template 'EP-FullRecon' -MaxHosts 500
+
+        Collects endpoint security baselines from up to 500 hosts.
+
+    .EXAMPLE
+        Invoke-ADScoutEDRCollection -DomainControllersOnly -OutputPath 'C:\Results\ad-recon.json'
+
+        Collects AD data from all DCs and exports to JSON.
+
+    .EXAMPLE
+        $results = Invoke-ADScoutEDRCollection -Filter @{Platform='Windows'; Online=$true} -MaxHosts 1000
+        $results.Results | Where-Object { $_.Output.SPNAccounts.Count -gt 0 }
+
+        Collect from online Windows hosts and filter results.
+
+    .OUTPUTS
+        PSCustomObject with consolidated results, timing, and any errors.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string]$Template = 'AD-FullRecon',
+
+        [Parameter()]
+        [string[]]$TargetHost,
+
+        [Parameter()]
+        [hashtable]$Filter,
+
+        [Parameter()]
+        [switch]$DomainControllersOnly,
+
+        [Parameter()]
+        [int]$MaxHosts = 100,
+
+        [Parameter()]
+        [int]$BatchSize,
+
+        [Parameter()]
+        [int]$ThrottleDelaySeconds,
+
+        [Parameter()]
+        [string]$Session,
+
+        [Parameter()]
+        [string]$OutputPath
+    )
+
+    begin {
+        $startTime = Get-Date
+        $targetSession = if ($Session) { $Session } else { $script:ADScoutEDRActiveSession }
+
+        if (-not (Test-ADScoutEDRConnection -Name $targetSession)) {
+            throw "Not connected to an EDR platform. Use Connect-ADScoutEDR first."
+        }
+
+        $sessionInfo = $script:ADScoutEDRSessions[$targetSession]
+        $provider = $sessionInfo.Provider
+        $providerName = $sessionInfo.ProviderName
+
+        # Determine batch size based on provider limits
+        $providerLimits = @{
+            'PSFalcon'    = @{ MaxConcurrent = 500; DefaultDelay = 2; BatchSize = 500 }
+            'DefenderATP' = @{ MaxConcurrent = 25;  DefaultDelay = 5; BatchSize = 20 }  # Conservative for MDE
+        }
+
+        $limits = $providerLimits[$providerName]
+        if (-not $limits) {
+            $limits = @{ MaxConcurrent = 50; DefaultDelay = 3; BatchSize = 50 }  # Safe defaults
+        }
+
+        $effectiveBatchSize = if ($BatchSize) { $BatchSize } else { $limits.BatchSize }
+        $effectiveDelay = if ($ThrottleDelaySeconds) { $ThrottleDelaySeconds } else { $limits.DefaultDelay }
+
+        Write-Host "`n[ADScout EDR Collection]" -ForegroundColor Cyan
+        Write-Host "Provider: $providerName (Max concurrent: $($limits.MaxConcurrent))" -ForegroundColor Gray
+        Write-Host "Template: $Template" -ForegroundColor Gray
+        Write-Host "Batch size: $effectiveBatchSize | Throttle delay: ${effectiveDelay}s" -ForegroundColor Gray
+    }
+
+    process {
+        # Build target list
+        $allTargets = @()
+
+        if ($TargetHost) {
+            $allTargets = $TargetHost
+            Write-Host "Using provided host list: $($allTargets.Count) hosts" -ForegroundColor Gray
+        }
+        elseif ($DomainControllersOnly) {
+            Write-Host "Discovering domain controllers..." -ForegroundColor Yellow
+            $dcHosts = Get-ADScoutEDRHost -DomainControllers -Session $targetSession
+            $allTargets = @($dcHosts | ForEach-Object {
+                if ($_.DeviceId) { $_.DeviceId } elseif ($_.MachineId) { $_.MachineId } else { $_.Hostname }
+            })
+            Write-Host "Found $($allTargets.Count) domain controllers" -ForegroundColor Green
+        }
+        elseif ($Filter) {
+            Write-Host "Querying hosts with filter..." -ForegroundColor Yellow
+            $filteredHosts = $provider.GetAvailableHosts($Filter)
+            $allTargets = @($filteredHosts | ForEach-Object {
+                if ($_.DeviceId) { $_.DeviceId } elseif ($_.MachineId) { $_.MachineId } else { $_.Hostname }
+            })
+            Write-Host "Found $($allTargets.Count) matching hosts" -ForegroundColor Green
+        }
+        else {
+            Write-Host "Querying all available hosts..." -ForegroundColor Yellow
+            $allHosts = $provider.GetAvailableHosts(@{ Platform = 'Windows'; Online = $true })
+            $allTargets = @($allHosts | ForEach-Object {
+                if ($_.DeviceId) { $_.DeviceId } elseif ($_.MachineId) { $_.MachineId } else { $_.Hostname }
+            })
+            Write-Host "Found $($allTargets.Count) online Windows hosts" -ForegroundColor Green
+        }
+
+        # Apply MaxHosts limit
+        if ($allTargets.Count -gt $MaxHosts) {
+            Write-Host "Limiting to first $MaxHosts hosts (use -MaxHosts to change)" -ForegroundColor Yellow
+            $allTargets = $allTargets | Select-Object -First $MaxHosts
+        }
+
+        if ($allTargets.Count -eq 0) {
+            Write-Warning "No target hosts found. Check your filter or connection."
+            return $null
+        }
+
+        # Calculate batches
+        $batches = [System.Collections.Generic.List[object]]::new()
+        for ($i = 0; $i -lt $allTargets.Count; $i += $effectiveBatchSize) {
+            $batch = $allTargets[$i..([Math]::Min($i + $effectiveBatchSize - 1, $allTargets.Count - 1))]
+            $batches.Add($batch)
+        }
+
+        Write-Host "`nCollection Plan:" -ForegroundColor Cyan
+        Write-Host "  Total hosts: $($allTargets.Count)" -ForegroundColor White
+        Write-Host "  Batches: $($batches.Count)" -ForegroundColor White
+        Write-Host "  Est. time: ~$([Math]::Ceiling($batches.Count * ($effectiveDelay + 30))) seconds" -ForegroundColor White
+        Write-Host ""
+
+        # Execute batches with progress
+        $allResults = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $totalSuccess = 0
+        $totalFailed = 0
+        $batchNum = 0
+
+        foreach ($batch in $batches) {
+            $batchNum++
+            $percentComplete = [Math]::Round(($batchNum / $batches.Count) * 100)
+
+            Write-Progress -Activity "ADScout EDR Collection" `
+                -Status "Batch $batchNum of $($batches.Count) ($($batch.Count) hosts)" `
+                -PercentComplete $percentComplete
+
+            Write-Host "[$batchNum/$($batches.Count)] Executing on $($batch.Count) hosts..." -ForegroundColor Cyan -NoNewline
+
+            try {
+                $batchResult = Invoke-ADScoutEDRCommand -Template $Template `
+                    -TargetHost $batch `
+                    -Session $targetSession `
+                    -ErrorAction Stop
+
+                if ($batchResult -and $batchResult.Results) {
+                    foreach ($result in $batchResult.Results) {
+                        $allResults.Add($result)
+                        if ($result.Success) { $totalSuccess++ } else { $totalFailed++ }
+                    }
+                    Write-Host " Done ($($batchResult.Successful) ok, $($batchResult.Failed) failed)" -ForegroundColor Green
+                }
+                else {
+                    Write-Host " No results" -ForegroundColor Yellow
+                }
+            }
+            catch {
+                Write-Host " ERROR: $_" -ForegroundColor Red
+                $totalFailed += $batch.Count
+            }
+
+            # Throttle between batches (except last)
+            if ($batchNum -lt $batches.Count) {
+                Write-Host "  Throttling ${effectiveDelay}s..." -ForegroundColor DarkGray
+                Start-Sleep -Seconds $effectiveDelay
+            }
+        }
+
+        Write-Progress -Activity "ADScout EDR Collection" -Completed
+    }
+
+    end {
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+
+        # Build consolidated result
+        $consolidatedResult = [PSCustomObject]@{
+            PSTypeName      = 'ADScout.EDR.CollectionResult'
+            CollectionType  = $Template
+            Provider        = $providerName
+            Session         = $targetSession
+            StartTime       = $startTime
+            EndTime         = $endTime
+            DurationSeconds = [Math]::Round($duration.TotalSeconds, 2)
+            TotalHosts      = $allTargets.Count
+            Successful      = $totalSuccess
+            Failed          = $totalFailed
+            BatchCount      = $batches.Count
+            BatchSize       = $effectiveBatchSize
+            Results         = $allResults
+        }
+
+        # Summary
+        Write-Host "`n" + ("=" * 50) -ForegroundColor Cyan
+        Write-Host "Collection Complete" -ForegroundColor Green
+        Write-Host ("=" * 50) -ForegroundColor Cyan
+        Write-Host "  Duration: $([Math]::Round($duration.TotalSeconds, 1)) seconds"
+        Write-Host "  Hosts: $totalSuccess successful, $totalFailed failed"
+        Write-Host "  Batches: $($batches.Count) @ $effectiveBatchSize hosts/batch"
+
+        # Export if requested
+        if ($OutputPath) {
+            try {
+                $consolidatedResult | ConvertTo-Json -Depth 20 | Set-Content -Path $OutputPath -Encoding UTF8
+                Write-Host "  Exported: $OutputPath" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "Failed to export: $_"
+            }
+        }
+
+        Write-Host ""
+
+        return $consolidatedResult
+    }
+}
