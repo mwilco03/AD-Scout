@@ -58,6 +58,145 @@
     "ReportOutputPath": {
       "type": "string",
       "description": "Default path for report output"
+    },
+    "EDR": {
+      "type": "object",
+      "description": "EDR wrapper configuration for remote command execution",
+      "properties": {
+        "DefaultProvider": {
+          "type": "string",
+          "enum": ["PSFalcon", "DefenderATP", "MDE", "CarbonBlack", "Custom"],
+          "description": "Default EDR provider to use for remote execution"
+        },
+        "PSFalcon": {
+          "type": "object",
+          "description": "CrowdStrike Falcon (PSFalcon) configuration",
+          "properties": {
+            "Cloud": {
+              "type": "string",
+              "enum": ["us-1", "us-2", "eu-1", "us-gov-1"],
+              "default": "us-1",
+              "description": "Falcon cloud region"
+            },
+            "ClientId": {
+              "type": "string",
+              "description": "API Client ID (store securely, not in config)"
+            },
+            "MemberCid": {
+              "type": "string",
+              "description": "Child CID for MSSP scenarios"
+            },
+            "MaxConcurrentCommands": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10,
+              "description": "Maximum concurrent RTR sessions"
+            },
+            "CommandTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 3600,
+              "default": 600,
+              "description": "Default timeout for command execution"
+            },
+            "QueueOfflineHosts": {
+              "type": "boolean",
+              "default": false,
+              "description": "Queue commands for offline hosts"
+            }
+          }
+        },
+        "DefenderATP": {
+          "type": "object",
+          "description": "Microsoft Defender for Endpoint configuration",
+          "properties": {
+            "TenantId": {
+              "type": "string",
+              "description": "Azure AD Tenant ID"
+            },
+            "ClientId": {
+              "type": "string",
+              "description": "App registration Client ID"
+            },
+            "BaseUrl": {
+              "type": "string",
+              "default": "https://api.securitycenter.microsoft.com",
+              "description": "MDE API base URL (change for gov clouds)"
+            },
+            "CommandTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 3600,
+              "default": 600,
+              "description": "Default timeout for Live Response actions"
+            }
+          }
+        },
+        "TargetHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Default target hosts for EDR command execution"
+        },
+        "TargetHostFilter": {
+          "type": "object",
+          "description": "Filter criteria for selecting target hosts",
+          "properties": {
+            "Platform": {
+              "type": "string",
+              "enum": ["Windows", "Linux", "macOS"],
+              "description": "Filter by OS platform"
+            },
+            "OnlineOnly": {
+              "type": "boolean",
+              "default": true,
+              "description": "Only target online/active hosts"
+            },
+            "HostnamePattern": {
+              "type": "string",
+              "description": "Regex pattern for hostname filtering"
+            },
+            "OUPattern": {
+              "type": "string",
+              "description": "Organizational Unit pattern filter"
+            },
+            "Tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Required host tags"
+            }
+          }
+        },
+        "RetryPolicy": {
+          "type": "object",
+          "description": "Retry policy for failed commands",
+          "properties": {
+            "MaxRetries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 3,
+              "description": "Maximum retry attempts"
+            },
+            "RetryDelaySeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300,
+              "default": 5,
+              "description": "Delay between retries"
+            },
+            "ExponentialBackoff": {
+              "type": "boolean",
+              "default": true,
+              "description": "Use exponential backoff for retries"
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false
