@@ -136,7 +136,18 @@ function Invoke-ADScoutScan {
         [string]$BaselinePath,
 
         [Parameter()]
-        [string]$EngagementId
+        [string]$EngagementId,
+
+        [Parameter()]
+        [ValidateSet('Stealth', 'Standard', 'Comprehensive', 'DCOnly', 'EndpointAudit')]
+        [string]$ScanProfile,
+
+        [Parameter()]
+        [ValidateSet('Stealth', 'Moderate', 'Noisy')]
+        [string[]]$AlertProfile,
+
+        [Parameter()]
+        [switch]$EnableAuditLog
     )
 
     begin {
@@ -195,6 +206,44 @@ function Invoke-ADScoutScan {
             $script:ADScoutCache.Timestamps.Clear()
         }
 
+        # Initialize audit log if enabled
+        $script:AuditLogEnabled = $EnableAuditLog
+        $script:AuditLog = @{
+            ExecutionId    = [guid]::NewGuid().ToString()
+            StartTime      = $startTime
+            Operator       = "$env:USERDOMAIN\$env:USERNAME"
+            TargetDomain   = $Domain
+            ScanProfile    = $ScanProfile
+            AlertProfile   = $AlertProfile
+            Parameters     = @{
+                Category       = $Category
+                RuleId         = $RuleId
+                ExcludeRuleId  = $ExcludeRuleId
+                IncludeEntraID = $IncludeEntraID.IsPresent
+                IncludeEndpointSecurity = $IncludeEndpointSecurity.IsPresent
+                Incremental    = $Incremental.IsPresent
+            }
+            RulesEvaluated = 0
+            FindingsCount  = 0
+            Events         = @()
+        }
+
+        if ($EnableAuditLog) {
+            Write-Verbose "Audit logging enabled. ExecutionId: $($script:AuditLog.ExecutionId)"
+        }
+
+        # Apply ScanProfile to AlertProfile if specified
+        if ($ScanProfile -and -not $AlertProfile) {
+            $AlertProfile = switch ($ScanProfile) {
+                'Stealth'       { @('Stealth') }
+                'Standard'      { @('Stealth', 'Moderate') }
+                'Comprehensive' { @('Stealth', 'Moderate', 'Noisy') }
+                'DCOnly'        { @('Stealth', 'Moderate', 'Noisy') }  # Filtered by category later
+                'EndpointAudit' { @('Noisy') }  # Endpoint rules are typically noisy
+            }
+            Write-Verbose "ScanProfile '$ScanProfile' mapped to AlertProfile: $($AlertProfile -join ', ')"
+        }
+
         # Get rules to execute
         $ruleParams = @{}
         if ($Category -and $Category -ne 'All') {
@@ -210,9 +259,42 @@ function Invoke-ADScoutScan {
             $rules = $rules | Where-Object { $_.Id -notin $ExcludeRuleId }
         }
 
+        # Apply AlertProfile filtering
+        if ($AlertProfile) {
+            $preFilterCount = $rules.Count
+            $rules = $rules | Where-Object {
+                $ruleAlertProfile = Get-RuleAlertProfile -Rule $_
+                $ruleAlertProfile -in $AlertProfile
+            }
+            $filteredCount = $preFilterCount - $rules.Count
+            if ($filteredCount -gt 0) {
+                Write-Verbose "Filtered $filteredCount rules based on AlertProfile ($($AlertProfile -join ', '))"
+                Write-Host "AlertProfile filter: Excluding $filteredCount rules outside of [$($AlertProfile -join ', ')] profiles" -ForegroundColor Yellow
+            }
+        }
+
+        # Apply ScanProfile-specific category filtering
+        if ($ScanProfile -eq 'DCOnly') {
+            $rules = $rules | Where-Object {
+                $_.Category -in @('PrivilegedAccess', 'Kerberos', 'Authentication', 'Infrastructure', 'DataProtection') -or
+                $_.DataSource -match 'DomainControllers'
+            }
+            Write-Verbose "DCOnly profile: Filtered to DC-relevant rules"
+        }
+        elseif ($ScanProfile -eq 'EndpointAudit') {
+            $rules = $rules | Where-Object { $_.Category -eq 'EndpointSecurity' -or $_.Id -like 'ES-*' -or $_.Id -like 'EDR-*' }
+            Write-Verbose "EndpointAudit profile: Filtered to endpoint rules"
+        }
+
         if (-not $rules) {
             Write-Warning "No rules found matching the specified criteria"
             return
+        }
+
+        # Display profile information
+        if ($ScanProfile -or $AlertProfile) {
+            $profileInfo = if ($ScanProfile) { "Profile: $ScanProfile" } else { "AlertProfile: $($AlertProfile -join ', ')" }
+            Write-Host "Scan configuration: $profileInfo | $($rules.Count) rules selected" -ForegroundColor Cyan
         }
 
         Write-Verbose "Found $($rules.Count) rules to execute"
@@ -501,6 +583,20 @@ function Invoke-ADScoutScan {
                 -Status 'Completed'
 
             Write-Verbose "Session saved to: $($script:CurrentSession.Path)"
+        }
+
+        # Save audit log if enabled
+        if ($script:AuditLogEnabled) {
+            $script:AuditLog.EndTime = $endTime
+            $script:AuditLog.Duration = $duration.TotalSeconds
+            $script:AuditLog.RulesEvaluated = $totalRules
+            $script:AuditLog.FindingsCount = $finalResults.Count
+            $script:AuditLog.TotalScore = ($finalResults | Measure-Object -Property Score -Sum).Sum
+
+            # Save audit manifest
+            Save-ADScoutAuditLog -AuditLog $script:AuditLog -SessionPath $script:CurrentSession.Path
+
+            Write-Host "`nAudit log saved. ExecutionId: $($script:AuditLog.ExecutionId)" -ForegroundColor Gray
         }
 
         # Return results
