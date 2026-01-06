@@ -1501,3 +1501,558 @@ try {
 $result | ConvertTo-Json -Depth 10 -Compress
 '@
 }
+
+# =============================================================================
+# Endpoint Security Configuration Templates (P0 - Critical)
+# =============================================================================
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-CredentialProtection'
+    Name               = 'Get Credential Protection Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves credential protection settings including WDigest, LSA Protection, Credential Guard, cached credentials, and NTLM settings.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 60
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    WDigest = $null
+    LSAProtection = $null
+    CredentialGuard = $null
+    CachedLogons = $null
+    NTLMSettings = $null
+    AutoLogon = $null
+    CredentialDelegation = $null
+    Errors = @()
+}
+
+try {
+    # WDigest - UseLogonCredential (cleartext passwords in memory)
+    try {
+        $wdigest = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -ErrorAction SilentlyContinue
+        $result.WDigest = @{
+            UseLogonCredential = $wdigest.UseLogonCredential
+            Negotiate = $wdigest.Negotiate
+            Vulnerable = ($wdigest.UseLogonCredential -eq 1)
+        }
+    } catch { $result.Errors += "WDigest: $($_.Exception.Message)" }
+
+    # LSA Protection (RunAsPPL)
+    try {
+        $lsa = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue
+        $result.LSAProtection = @{
+            RunAsPPL = $lsa.RunAsPPL
+            LimitBlankPasswordUse = $lsa.LimitBlankPasswordUse
+            NoLMHash = $lsa.NoLMHash
+            RestrictAnonymous = $lsa.RestrictAnonymous
+            RestrictAnonymousSAM = $lsa.RestrictAnonymousSAM
+            EveryoneIncludesAnonymous = $lsa.EveryoneIncludesAnonymous
+            Protected = ($lsa.RunAsPPL -eq 1)
+        }
+    } catch { $result.Errors += "LSAProtection: $($_.Exception.Message)" }
+
+    # Credential Guard / Device Guard
+    try {
+        $dg = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard -ErrorAction SilentlyContinue
+        if ($dg) {
+            $result.CredentialGuard = @{
+                SecurityServicesConfigured = $dg.SecurityServicesConfigured
+                SecurityServicesRunning = $dg.SecurityServicesRunning
+                VirtualizationBasedSecurityStatus = $dg.VirtualizationBasedSecurityStatus
+                VBSRunning = ($dg.VirtualizationBasedSecurityStatus -eq 2)
+                CredentialGuardRunning = ($dg.SecurityServicesRunning -contains 1)
+                HVCIRunning = ($dg.SecurityServicesRunning -contains 2)
+            }
+        } else {
+            $result.CredentialGuard = @{ Available = $false }
+        }
+    } catch { $result.Errors += "CredentialGuard: $($_.Exception.Message)" }
+
+    # Cached Logons
+    try {
+        $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+        $result.CachedLogons = @{
+            CachedLogonsCount = $winlogon.CachedLogonsCount
+            ExcessiveCaching = ([int]$winlogon.CachedLogonsCount -gt 2)
+        }
+    } catch { $result.Errors += "CachedLogons: $($_.Exception.Message)" }
+
+    # NTLM Settings
+    try {
+        $lsaMsa = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -ErrorAction SilentlyContinue
+        $lsaPolicy = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'LmCompatibilityLevel' -ErrorAction SilentlyContinue
+        $result.NTLMSettings = @{
+            LmCompatibilityLevel = $lsaPolicy.LmCompatibilityLevel
+            NtlmMinClientSec = $lsaMsa.NtlmMinClientSec
+            NtlmMinServerSec = $lsaMsa.NtlmMinServerSec
+            RestrictSendingNTLMTraffic = $lsaMsa.RestrictSendingNTLMTraffic
+        }
+    } catch { $result.Errors += "NTLMSettings: $($_.Exception.Message)" }
+
+    # AutoLogon credentials
+    try {
+        $autologon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+        $result.AutoLogon = @{
+            AutoAdminLogon = $autologon.AutoAdminLogon
+            DefaultUserName = $autologon.DefaultUserName
+            DefaultDomainName = $autologon.DefaultDomainName
+            DefaultPasswordSet = (-not [string]::IsNullOrEmpty($autologon.DefaultPassword))
+            Vulnerable = (($autologon.AutoAdminLogon -eq '1') -and (-not [string]::IsNullOrEmpty($autologon.DefaultPassword)))
+        }
+    } catch { $result.Errors += "AutoLogon: $($_.Exception.Message)" }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-DefenderStatus'
+    Name               = 'Get Windows Defender Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves comprehensive Windows Defender configuration including real-time protection, exclusions, ASR rules, and tamper protection.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 90
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    MpComputerStatus = $null
+    MpPreference = $null
+    Exclusions = $null
+    ASRRules = $null
+    Errors = @()
+}
+
+try {
+    # Get Defender status
+    try {
+        $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+        if ($status) {
+            $result.MpComputerStatus = @{
+                AMServiceEnabled = $status.AMServiceEnabled
+                AntispywareEnabled = $status.AntispywareEnabled
+                AntivirusEnabled = $status.AntivirusEnabled
+                AntivirusSignatureAge = $status.AntivirusSignatureAge
+                BehaviorMonitorEnabled = $status.BehaviorMonitorEnabled
+                IoavProtectionEnabled = $status.IoavProtectionEnabled
+                IsTamperProtected = $status.IsTamperProtected
+                NISEnabled = $status.NISEnabled
+                OnAccessProtectionEnabled = $status.OnAccessProtectionEnabled
+                RealTimeProtectionEnabled = $status.RealTimeProtectionEnabled
+                DefenderSignaturesOutOfDate = $status.DefenderSignaturesOutOfDate
+            }
+        }
+    } catch { $result.Errors += "MpComputerStatus: $($_.Exception.Message)" }
+
+    # Get Defender preferences
+    try {
+        $pref = Get-MpPreference -ErrorAction SilentlyContinue
+        if ($pref) {
+            $result.MpPreference = @{
+                DisableRealtimeMonitoring = $pref.DisableRealtimeMonitoring
+                DisableBehaviorMonitoring = $pref.DisableBehaviorMonitoring
+                DisableIOAVProtection = $pref.DisableIOAVProtection
+                DisableScriptScanning = $pref.DisableScriptScanning
+                EnableControlledFolderAccess = $pref.EnableControlledFolderAccess
+                EnableNetworkProtection = $pref.EnableNetworkProtection
+                PUAProtection = $pref.PUAProtection
+            }
+
+            $result.Exclusions = @{
+                ExclusionPath = @($pref.ExclusionPath)
+                ExclusionExtension = @($pref.ExclusionExtension)
+                ExclusionProcess = @($pref.ExclusionProcess)
+                TotalExclusions = @($pref.ExclusionPath).Count + @($pref.ExclusionExtension).Count + @($pref.ExclusionProcess).Count
+            }
+
+            # ASR Rules
+            $asrIds = $pref.AttackSurfaceReductionRules_Ids
+            $asrActions = $pref.AttackSurfaceReductionRules_Actions
+            $asrRules = @()
+            if ($asrIds -and $asrActions) {
+                for ($i = 0; $i -lt $asrIds.Count; $i++) {
+                    $asrRules += @{ RuleId = $asrIds[$i]; Action = $asrActions[$i] }
+                }
+            }
+            $result.ASRRules = @{
+                Rules = $asrRules
+                EnabledCount = ($asrRules | Where-Object { $_.Action -eq 1 }).Count
+                DisabledCount = ($asrRules | Where-Object { $_.Action -eq 0 }).Count
+            }
+        }
+    } catch { $result.Errors += "MpPreference: $($_.Exception.Message)" }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-UACConfiguration'
+    Name               = 'Get UAC Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves User Account Control configuration settings.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $false
+    Timeout            = 30
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    UACSettings = $null
+    Vulnerabilities = @()
+    Errors = @()
+}
+
+try {
+    $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
+
+    $result.UACSettings = @{
+        EnableLUA = $uac.EnableLUA
+        ConsentPromptBehaviorAdmin = $uac.ConsentPromptBehaviorAdmin
+        ConsentPromptBehaviorUser = $uac.ConsentPromptBehaviorUser
+        FilterAdministratorToken = $uac.FilterAdministratorToken
+        PromptOnSecureDesktop = $uac.PromptOnSecureDesktop
+        EnableVirtualization = $uac.EnableVirtualization
+        LocalAccountTokenFilterPolicy = $uac.LocalAccountTokenFilterPolicy
+    }
+
+    if ($uac.EnableLUA -eq 0) {
+        $result.Vulnerabilities += @{ Setting = 'EnableLUA'; Risk = 'Critical'; Description = 'UAC disabled' }
+    }
+    if ($uac.ConsentPromptBehaviorAdmin -eq 0) {
+        $result.Vulnerabilities += @{ Setting = 'ConsentPromptBehaviorAdmin'; Risk = 'High'; Description = 'Admin elevates without prompt' }
+    }
+    if ($uac.LocalAccountTokenFilterPolicy -eq 1) {
+        $result.Vulnerabilities += @{ Setting = 'LocalAccountTokenFilterPolicy'; Risk = 'High'; Description = 'Remote UAC disabled' }
+    }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-LocalAccounts'
+    Name               = 'Get Local Accounts and Groups'
+    Category           = 'EndpointSecurity'
+    Description        = 'Enumerates local accounts and security-relevant group memberships.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 60
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    LocalUsers = @()
+    SecurityGroups = @{}
+    Errors = @()
+}
+
+try {
+    # Local users
+    $users = Get-LocalUser -ErrorAction SilentlyContinue
+    foreach ($user in $users) {
+        $result.LocalUsers += @{
+            Name = $user.Name
+            Enabled = $user.Enabled
+            PasswordLastSet = if($user.PasswordLastSet) { $user.PasswordLastSet.ToString('o') } else { $null }
+            PasswordRequired = $user.PasswordRequired
+            SID = $user.SID.Value
+        }
+    }
+
+    # Security groups
+    $groups = @('Administrators','Remote Desktop Users','Backup Operators','Hyper-V Administrators')
+    foreach ($groupName in $groups) {
+        try {
+            $members = Get-LocalGroupMember -Group $groupName -ErrorAction SilentlyContinue
+            $result.SecurityGroups[$groupName] = @{
+                Members = @($members | ForEach-Object { @{ Name = $_.Name; ObjectClass = $_.ObjectClass } })
+                MemberCount = @($members).Count
+            }
+        } catch {}
+    }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-ServiceSecurity'
+    Name               = 'Get Service Security Issues'
+    Category           = 'EndpointSecurity'
+    Description        = 'Identifies service security issues including unquoted paths and weak permissions.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 120
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    UnquotedPaths = @()
+    HighPrivilegeServices = @()
+    Errors = @()
+}
+
+try {
+    $services = Get-CimInstance Win32_Service -ErrorAction SilentlyContinue
+
+    foreach ($svc in $services) {
+        $pathName = $svc.PathName
+        if ($pathName -and $pathName -notmatch '^"' -and $pathName -match '\s' -and $pathName -match '\.exe') {
+            $result.UnquotedPaths += @{
+                ServiceName = $svc.Name
+                DisplayName = $svc.DisplayName
+                PathName = $pathName
+                StartMode = $svc.StartMode
+                StartName = $svc.StartName
+            }
+        }
+
+        if ($svc.StartName -eq 'LocalSystem' -and $svc.PathName -notmatch 'Windows|Microsoft') {
+            $result.HighPrivilegeServices += @{
+                ServiceName = $svc.Name
+                DisplayName = $svc.DisplayName
+                PathName = $svc.PathName
+            }
+        }
+    }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-PersistenceMechanisms'
+    Name               = 'Get Persistence Mechanisms'
+    Category           = 'EndpointSecurity'
+    Description        = 'Enumerates persistence mechanisms including Run keys, scheduled tasks, and WMI subscriptions.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 120
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    RunKeys = @()
+    ScheduledTasks = @()
+    WMISubscriptions = @()
+    Errors = @()
+}
+
+try {
+    # Run Keys
+    $runPaths = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run')
+    foreach ($path in $runPaths) {
+        $keys = Get-ItemProperty $path -ErrorAction SilentlyContinue
+        if ($keys) {
+            $props = $keys.PSObject.Properties | Where-Object { $_.Name -notin @('PSPath','PSParentPath','PSChildName','PSProvider') }
+            foreach ($prop in $props) {
+                $result.RunKeys += @{ Path = $path; Name = $prop.Name; Value = $prop.Value }
+            }
+        }
+    }
+
+    # Scheduled Tasks (non-Microsoft)
+    $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskPath -notmatch '^\\Microsoft\\' -and $_.State -ne 'Disabled' }
+    foreach ($task in $tasks | Select-Object -First 30) {
+        $result.ScheduledTasks += @{
+            TaskName = $task.TaskName
+            TaskPath = $task.TaskPath
+            UserId = $task.Principal.UserId
+            Actions = @($task.Actions | ForEach-Object { $_.Execute })
+        }
+    }
+
+    # WMI Subscriptions
+    $consumers = Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -ErrorAction SilentlyContinue
+    foreach ($c in $consumers) {
+        $result.WMISubscriptions += @{ Name = $c.Name; CommandLineTemplate = $c.CommandLineTemplate }
+    }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-PowerShellSecurity'
+    Name               = 'Get PowerShell Security Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves PowerShell security settings including execution policy and logging.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $false
+    Timeout            = 60
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    ExecutionPolicy = (Get-ExecutionPolicy -ErrorAction SilentlyContinue)
+    LanguageMode = $ExecutionContext.SessionState.LanguageMode.ToString()
+    Logging = $null
+    PSVersion = $PSVersionTable.PSVersion.ToString()
+    Errors = @()
+}
+
+try {
+    $psLogging = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging' -ErrorAction SilentlyContinue
+    $moduleLogging = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -ErrorAction SilentlyContinue
+
+    $result.Logging = @{
+        ScriptBlockLogging = ($psLogging.EnableScriptBlockLogging -eq 1)
+        ModuleLogging = ($moduleLogging.EnableModuleLogging -eq 1)
+    }
+
+    $psv2 = Get-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2 -ErrorAction SilentlyContinue
+    $result.V2Enabled = ($psv2.State -eq 'Enabled')
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-NetworkSecurity'
+    Name               = 'Get Network Security Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves network security settings including firewall, proxy, SMB, and RDP.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 90
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    Firewall = @()
+    SMB = $null
+    RDP = $null
+    Proxy = $null
+    Errors = @()
+}
+
+try {
+    # Firewall
+    $fw = Get-NetFirewallProfile -ErrorAction SilentlyContinue
+    foreach ($p in $fw) {
+        $result.Firewall += @{ Profile = $p.Name; Enabled = $p.Enabled }
+    }
+
+    # SMB
+    $smbServer = Get-SmbServerConfiguration -ErrorAction SilentlyContinue
+    $smb1 = Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -ErrorAction SilentlyContinue
+    $result.SMB = @{
+        SMB1Enabled = ($smb1.State -eq 'Enabled')
+        RequireSecuritySignature = $smbServer.RequireSecuritySignature
+        EncryptData = $smbServer.EncryptData
+    }
+
+    # RDP
+    $rdp = Get-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -ErrorAction SilentlyContinue
+    $nla = Get-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -ErrorAction SilentlyContinue
+    $result.RDP = @{
+        Enabled = ($rdp.fDenyTSConnections -eq 0)
+        NLARequired = ($nla.UserAuthentication -eq 1)
+    }
+
+    # Proxy
+    $ieProxy = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue
+    $result.Proxy = @{
+        ProxyEnabled = $ieProxy.ProxyEnable
+        ProxyServer = $ieProxy.ProxyServer
+        AutoConfigURL = $ieProxy.AutoConfigURL
+    }
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
+
+Register-ADScoutEDRTemplate @{
+    Id                 = 'EP-AuditPolicy'
+    Name               = 'Get Audit Policy Configuration'
+    Category           = 'EndpointSecurity'
+    Description        = 'Retrieves Windows audit policy and event log configuration.'
+    IsWriteOperation   = $false
+    RequiresElevation  = $true
+    Timeout            = 60
+    OutputType         = 'JSON'
+    ScriptBlock        = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$result = @{
+    Timestamp = Get-Date -Format 'o'
+    Hostname = $env:COMPUTERNAME
+    EventLogs = @()
+    CommandLineAuditing = $null
+    Errors = @()
+}
+
+try {
+    $logNames = @('Security', 'Microsoft-Windows-PowerShell/Operational', 'Microsoft-Windows-Sysmon/Operational')
+    foreach ($logName in $logNames) {
+        $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
+        if ($log) {
+            $result.EventLogs += @{
+                LogName = $log.LogName
+                MaxSizeMB = [math]::Round($log.MaximumSizeInBytes / 1MB, 2)
+                IsEnabled = $log.IsEnabled
+            }
+        }
+    }
+
+    $cmdline = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit' -Name 'ProcessCreationIncludeCmdLine_Enabled' -ErrorAction SilentlyContinue
+    $result.CommandLineAuditing = ($cmdline.ProcessCreationIncludeCmdLine_Enabled -eq 1)
+
+} catch {
+    $result.Errors += "Global: $($_.Exception.Message)"
+}
+
+$result | ConvertTo-Json -Depth 10 -Compress
+'@
+}
