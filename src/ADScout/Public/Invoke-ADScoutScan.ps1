@@ -373,8 +373,38 @@ function Invoke-ADScoutScan {
 
         Write-Verbose "Data collection complete"
 
+        # Report data availability status
+        $dataAvailability = @{
+            'Active Directory' = $true
+            'Users'            = ($adData.Users -and $adData.Users.Count -gt 0)
+            'Computers'        = ($adData.Computers -and $adData.Computers.Count -gt 0)
+            'Groups'           = ($adData.Groups -and $adData.Groups.Count -gt 0)
+            'GPOs'             = ($adData.GPOs -and $adData.GPOs.Count -gt 0)
+            'Domain Controllers' = ($adData.DomainControllers -and $adData.DomainControllers.Count -gt 0)
+            'Entra ID'         = ($adData.EntraConnected -eq $true)
+            'Email/Exchange'   = ($adData.EmailConnected -eq $true)
+            'Endpoint Security' = ($adData.EndpointConnected -eq $true)
+        }
+
+        # Warn about unavailable data sources that might affect rule execution
+        $unavailableOptional = @()
+        if (-not $dataAvailability['Entra ID'] -and ($Category -contains 'EntraID' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Entra ID (run Connect-MgGraph first)'
+        }
+        if (-not $dataAvailability['Email/Exchange'] -and ($Category -contains 'Email' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Email/Exchange (connect to Exchange/EXO first)'
+        }
+        if (-not $dataAvailability['Endpoint Security'] -and ($Category -contains 'EndpointSecurity' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Endpoint Security (use -IncludeEndpointSecurity with target computers)'
+        }
+
+        if ($unavailableOptional.Count -gt 0) {
+            Write-Warning "Some optional data sources unavailable - related rules will be skipped: $($unavailableOptional -join ', ')"
+        }
+
         # Execute rules
         $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $skippedRules = [System.Collections.Generic.List[string]]::new()
         $totalRules = $rules.Count
 
         Write-Verbose "Executing $totalRules rules"

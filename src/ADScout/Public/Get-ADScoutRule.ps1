@@ -215,6 +215,12 @@ function Get-ADScoutRule {
                             SourceFile    = $file.FullName
                         }
 
+                        # Validate rule interface
+                        $validationResult = Test-ADScoutRuleInterface -Rule $ruleObject
+                        if (-not $validationResult.Valid) {
+                            Write-Warning "Rule $($rule.Id) validation issue: $($validationResult.Message)"
+                        }
+
                         $rules += $ruleObject
                     }
                 }
