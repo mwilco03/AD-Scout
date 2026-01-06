@@ -41,6 +41,19 @@
         'Disconnect-ADScoutGraph'
         'Test-ADScoutGraphConnection'
 
+        # EDR Integration
+        'Connect-ADScoutEDR'
+        'Disconnect-ADScoutEDR'
+        'Test-ADScoutEDRConnection'
+        'Switch-ADScoutEDRConnection'
+        'Get-ADScoutEDRConnection'
+        'Invoke-ADScoutEDRCommand'
+        'Invoke-ADScoutEDRCollection'
+        'Get-ADScoutEDRHost'
+        'Get-ADScoutEDRCapabilities'
+        'Get-ADScoutEDRProvider'
+        'Get-ADScoutEDRTemplate'
+
         # Baseline storage
         'Export-ADScoutBaseline'
         'Import-ADScoutBaseline'
@@ -79,7 +92,7 @@
 
     PrivateData       = @{
         PSData = @{
-            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53', 'EntraID', 'AzureAD', 'MicrosoftGraph')
+            Tags         = @('ActiveDirectory', 'Security', 'Audit', 'Assessment', 'Compliance', 'MITRE', 'CIS', 'NIST', 'NIST800-53', 'EntraID', 'AzureAD', 'MicrosoftGraph', 'EDR', 'CrowdStrike', 'PSFalcon', 'DefenderATP', 'MDE', 'RemoteExecution')
             LicenseUri   = 'https://github.com/mwilco03/AD-Scout/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/mwilco03/AD-Scout'
             IconUri      = ''
