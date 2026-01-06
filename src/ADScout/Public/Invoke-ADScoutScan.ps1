@@ -97,11 +97,18 @@ function Invoke-ADScoutScan {
         [PSCredential]$Credential,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'All')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'All')]
         [string[]]$Category = 'All',
 
         [Parameter()]
         [switch]$IncludeEntraID,
+
+        [Parameter()]
+        [Alias('IncludeEndpoint')]
+        [switch]$IncludeEndpointSecurity,
+
+        [Parameter()]
+        [string[]]$TargetComputers,
 
         [Parameter()]
         [string[]]$RuleId,
@@ -300,6 +307,23 @@ function Invoke-ADScoutScan {
         }
         else {
             $adData['EntraConnected'] = $false
+        }
+
+        # Collect Endpoint Security data if requested or EndpointSecurity category is specified
+        $collectEndpoint = $IncludeEndpointSecurity -or ($Category -contains 'EndpointSecurity') -or ($Category -contains 'All')
+
+        if ($collectEndpoint) {
+            Write-Verbose "Collecting Endpoint Security data..."
+            $endpointParams = @{}
+            if ($TargetComputers) { $endpointParams['ComputerName'] = $TargetComputers }
+            if ($Credential) { $endpointParams['Credential'] = $Credential }
+
+            $adData['EndpointData'] = Get-ADScoutEndpointData @endpointParams
+            $adData['EndpointConnected'] = ($null -ne $adData['EndpointData'])
+            Write-Verbose "Endpoint Security data collection complete"
+        }
+        else {
+            $adData['EndpointConnected'] = $false
         }
 
         Write-Verbose "Data collection complete"

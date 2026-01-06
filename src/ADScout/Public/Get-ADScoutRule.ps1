@@ -50,7 +50,7 @@ function Get-ADScoutRule {
         [string[]]$Id,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'Authentication', 'Infrastructure', 'AttackVectors', 'ServiceAccounts', 'Persistence', 'EphemeralPersistence', 'Logging', 'LateralMovement', 'DataProtection', 'AzureAD')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Authentication', 'Infrastructure', 'AttackVectors', 'ServiceAccounts', 'Persistence', 'EphemeralPersistence', 'Logging', 'LateralMovement', 'DataProtection', 'AzureAD')]
         [string[]]$Category,
 
         [Parameter()]
