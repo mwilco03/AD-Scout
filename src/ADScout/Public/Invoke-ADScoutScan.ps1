@@ -97,7 +97,7 @@ function Invoke-ADScoutScan {
         [PSCredential]$Credential,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'All')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'PrivilegedAccess', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Email', 'Authentication', 'LateralMovement', 'DataProtection', 'AttackVectors', 'All')]
         [string[]]$Category = 'All',
 
         [Parameter()]
@@ -106,6 +106,12 @@ function Invoke-ADScoutScan {
         [Parameter()]
         [Alias('IncludeEndpoint')]
         [switch]$IncludeEndpointSecurity,
+
+        [Parameter()]
+        [switch]$IncludeEmail,
+
+        [Parameter()]
+        [string[]]$InternalDomains,
 
         [Parameter()]
         [string[]]$TargetComputers,
@@ -324,6 +330,45 @@ function Invoke-ADScoutScan {
         }
         else {
             $adData['EndpointConnected'] = $false
+        }
+
+        # Collect Email/Mailbox data if requested or Email category is specified
+        $collectEmail = $IncludeEmail -or ($Category -contains 'Email') -or ($Category -contains 'All')
+
+        if ($collectEmail) {
+            # Check if Exchange cmdlets are available
+            $exchangeAvailable = (Get-Command Get-Mailbox -ErrorAction SilentlyContinue) -or
+                                 (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue)
+
+            if ($exchangeAvailable) {
+                Write-Verbose "Collecting Email/Mailbox data..."
+                $mailboxParams = @{
+                    IncludeInboxRules = $true
+                    IncludePermissions = $true
+                }
+                if ($InternalDomains) { $mailboxParams['InternalDomains'] = $InternalDomains }
+
+                $mailboxData = Get-ADScoutMailboxData @mailboxParams
+
+                # Merge mailbox data into adData for rule consumption
+                $adData['Mailboxes'] = $mailboxData.Mailboxes
+                $adData['ForwardingRules'] = $mailboxData.ForwardingRules
+                $adData['InboxRules'] = $mailboxData.InboxRules
+                $adData['MailboxPermissions'] = $mailboxData.MailboxPermissions
+                $adData['SendAsPermissions'] = $mailboxData.SendAsPermissions
+                $adData['SendOnBehalfPermissions'] = $mailboxData.SendOnBehalfPermissions
+                $adData['TransportRules'] = $mailboxData.TransportRules
+                $adData['InternalDomains'] = $mailboxData.InternalDomains
+                $adData['EmailConnected'] = $true
+                Write-Verbose "Email/Mailbox data collection complete: $($mailboxData.Mailboxes.Count) mailboxes"
+            }
+            else {
+                Write-Verbose "Exchange cmdlets not available. Email rules will be skipped. Connect to Exchange first."
+                $adData['EmailConnected'] = $false
+            }
+        }
+        else {
+            $adData['EmailConnected'] = $false
         }
 
         Write-Verbose "Data collection complete"

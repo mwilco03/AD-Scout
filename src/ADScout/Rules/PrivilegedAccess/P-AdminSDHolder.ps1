@@ -40,30 +40,86 @@
             'Backup Operators'
             'Print Operators'
             'Server Operators'
+            'Replicator'
+            'ENTERPRISE DOMAIN CONTROLLERS'
+        )
+
+        # Legitimate SIDs that are always expected
+        $legitimateSIDs = @(
+            'S-1-5-32-544'      # Administrators
+            'S-1-5-18'          # SYSTEM
+            'S-1-5-9'           # Enterprise DCs
+            'S-1-5-32-548'      # Account Operators
+            'S-1-5-32-551'      # Backup Operators
+            'S-1-5-32-550'      # Print Operators
+            'S-1-5-32-549'      # Server Operators
         )
 
         $findings = @()
 
-        foreach ($ace in $Data.ACL) {
-            $trusteeName = $ace.IdentityReference.Value
-
-            # Check if this is a non-default trustee
-            $isDefault = $false
-            foreach ($defaultTrustee in $defaultTrustees) {
-                if ($trusteeName -like "*\$defaultTrustee" -or $trusteeName -eq $defaultTrustee) {
-                    $isDefault = $true
-                    break
-                }
+        try {
+            # Get AdminSDHolder ACL directly via ADSI
+            $domainDN = $null
+            if ($Domain.DistinguishedName) {
+                $domainDN = $Domain.DistinguishedName
+            } else {
+                $domainDN = ([ADSI]"LDAP://RootDSE").defaultNamingContext
             }
 
-            if (-not $isDefault -and $ace.AccessControlType -eq 'Allow') {
-                $findings += [PSCustomObject]@{
-                    Trustee      = $trusteeName
-                    Rights       = $ace.ActiveDirectoryRights
-                    Inherited    = $ace.IsInherited
-                    ObjectType   = $ace.ObjectType
+            $adminSDHolderDN = "CN=AdminSDHolder,CN=System,$domainDN"
+            $adminSDHolder = [ADSI]"LDAP://$adminSDHolderDN"
+            $acl = $adminSDHolder.ObjectSecurity
+
+            foreach ($ace in $acl.Access) {
+                if ($ace.AccessControlType -ne 'Allow') { continue }
+
+                $trusteeName = $ace.IdentityReference.Value
+
+                # Check if this is a default trustee
+                $isDefault = $false
+                foreach ($defaultTrustee in $defaultTrustees) {
+                    if ($trusteeName -like "*\$defaultTrustee" -or $trusteeName -eq $defaultTrustee -or $trusteeName -like "*$defaultTrustee") {
+                        $isDefault = $true
+                        break
+                    }
+                }
+
+                # Check by SID if not matched by name
+                if (-not $isDefault) {
+                    try {
+                        $ntAccount = New-Object System.Security.Principal.NTAccount($trusteeName)
+                        $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
+
+                        foreach ($legitSID in $legitimateSIDs) {
+                            if ($sid -eq $legitSID) {
+                                $isDefault = $true
+                                break
+                            }
+                        }
+
+                        # Check domain-relative privileged SIDs
+                        if ($sid -match '-512$' -or $sid -match '-519$') {
+                            $isDefault = $true
+                        }
+                    } catch {
+                        # Can't resolve SID, keep checking
+                    }
+                }
+
+                if (-not $isDefault) {
+                    $findings += [PSCustomObject]@{
+                        Trustee               = $trusteeName
+                        Rights                = $ace.ActiveDirectoryRights.ToString()
+                        Inherited             = $ace.IsInherited
+                        ObjectType            = $ace.ObjectType.ToString()
+                        RiskLevel             = 'Critical'
+                        DistinguishedName     = $adminSDHolderDN
+                        AttackType            = 'AdminSDHolder Persistence'
+                    }
                 }
             }
+        } catch {
+            # Can't access AdminSDHolder - likely permissions issue
         }
 
         return $findings
