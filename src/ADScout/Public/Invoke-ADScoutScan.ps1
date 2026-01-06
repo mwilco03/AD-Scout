@@ -91,17 +91,36 @@ function Invoke-ADScoutScan {
         [string]$Domain,
 
         [Parameter()]
+        [string[]]$Domains,
+
+        [Parameter()]
+        [switch]$Forest,
+
+        [Parameter()]
         [string]$Server,
 
         [Parameter()]
         [PSCredential]$Credential,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'All')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'PrivilegedAccess', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Email', 'Authentication', 'LateralMovement', 'DataProtection', 'AttackVectors', 'All')]
         [string[]]$Category = 'All',
 
         [Parameter()]
         [switch]$IncludeEntraID,
+
+        [Parameter()]
+        [Alias('IncludeEndpoint')]
+        [switch]$IncludeEndpointSecurity,
+
+        [Parameter()]
+        [switch]$IncludeEmail,
+
+        [Parameter()]
+        [string[]]$InternalDomains,
+
+        [Parameter()]
+        [string[]]$TargetComputers,
 
         [Parameter()]
         [string[]]$RuleId,
@@ -123,17 +142,131 @@ function Invoke-ADScoutScan {
         [string]$BaselinePath,
 
         [Parameter()]
-        [string]$EngagementId
+        [string]$EngagementId,
+
+        [Parameter()]
+        [ValidateSet('Stealth', 'Standard', 'Comprehensive', 'DCOnly', 'EndpointAudit')]
+        [string]$ScanProfile,
+
+        [Parameter()]
+        [ValidateSet('Stealth', 'Moderate', 'Noisy')]
+        [string[]]$AlertProfile,
+
+        [Parameter()]
+        [switch]$EnableAuditLog
     )
 
     begin {
         Write-Verbose "Starting AD-Scout scan"
         $startTime = Get-Date
 
+        # Handle forest-wide or multi-domain scans
+        if ($Forest -or $Domains) {
+            $targetDomains = @()
+
+            if ($Forest) {
+                try {
+                    $forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()
+                    $targetDomains = $forest.Domains | ForEach-Object { $_.Name }
+                    Write-Host "Forest scan: Found $($targetDomains.Count) domains" -ForegroundColor Cyan
+                    $targetDomains | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
+                }
+                catch {
+                    Write-Error "Failed to enumerate forest domains: $_"
+                    return
+                }
+            }
+            elseif ($Domains) {
+                $targetDomains = $Domains
+            }
+
+            if ($targetDomains.Count -gt 1) {
+                Write-Host "`nScanning $($targetDomains.Count) domains..." -ForegroundColor Cyan
+
+                $allResults = @()
+                $domainCount = 0
+
+                foreach ($targetDomain in $targetDomains) {
+                    $domainCount++
+                    Write-Host "`n[$domainCount/$($targetDomains.Count)] Scanning: $targetDomain" -ForegroundColor Yellow
+
+                    # Recursive call for each domain
+                    $domainResults = Invoke-ADScoutScan -Domain $targetDomain -Credential $Credential `
+                        -Category $Category -ScanProfile $ScanProfile -AlertProfile $AlertProfile `
+                        -RuleId $RuleId -ExcludeRuleId $ExcludeRuleId `
+                        -IncludeEntraID:$IncludeEntraID -IncludeEndpointSecurity:$IncludeEndpointSecurity `
+                        -EnableAuditLog:$EnableAuditLog
+
+                    # Tag results with domain
+                    $domainResults | ForEach-Object {
+                        $_ | Add-Member -NotePropertyName 'SourceDomain' -NotePropertyValue $targetDomain -Force
+                    }
+
+                    $allResults += $domainResults
+                }
+
+                Write-Host "`nForest scan complete: $($allResults.Count) findings across $($targetDomains.Count) domains" -ForegroundColor Cyan
+
+                return $allResults
+            }
+            elseif ($targetDomains.Count -eq 1) {
+                $Domain = $targetDomains[0]
+            }
+        }
+
         # Initialize session for disk persistence
         $sessionParams = @{}
         if ($EngagementId) { $sessionParams.EngagementId = $EngagementId }
         $script:CurrentSession = Get-ADScoutSessionPath @sessionParams
+
+        # Load engagement config if available
+        if ($EngagementId) {
+            $engagementConfig = Get-ADScoutEngagementConfig -EngagementId $EngagementId -ErrorAction SilentlyContinue
+            if ($engagementConfig) {
+                Write-Verbose "Loaded engagement config for: $EngagementId"
+
+                # Apply config defaults if not explicitly provided
+                if (-not $Domain -and $engagementConfig.DefaultDomain) {
+                    $Domain = $engagementConfig.DefaultDomain
+                    Write-Verbose "Using engagement default domain: $Domain"
+                }
+
+                if (-not $ScanProfile -and $engagementConfig.DefaultScanProfile) {
+                    $ScanProfile = $engagementConfig.DefaultScanProfile
+                    Write-Verbose "Using engagement default scan profile: $ScanProfile"
+                }
+
+                if (-not $ExcludeRuleId -and $engagementConfig.ExcludeRules) {
+                    $ExcludeRuleId = $engagementConfig.ExcludeRules
+                    Write-Host "Engagement config: Excluding $($ExcludeRuleId.Count) rules" -ForegroundColor Gray
+                }
+
+                if ($engagementConfig.DefaultCategories -and $Category -eq 'All') {
+                    $Category = $engagementConfig.DefaultCategories
+                }
+            }
+        }
+
+        # Auto-suggest incremental scan if baseline exists
+        if (-not $Incremental -and -not $BaselinePath) {
+            $latestSession = if ($EngagementId) {
+                Get-ADScoutLatestSession -EngagementId $EngagementId -ErrorAction SilentlyContinue
+            } else {
+                Get-ADScoutLatestSession -ErrorAction SilentlyContinue
+            }
+
+            if ($latestSession -and $latestSession.ScanTime) {
+                $hoursSince = ((Get-Date) - $latestSession.ScanTime).TotalHours
+                if ($hoursSince -lt 168) {  # Within 1 week
+                    $timeAgo = if ($hoursSince -lt 1) { "$([math]::Round($hoursSince * 60)) minutes ago" }
+                              elseif ($hoursSince -lt 24) { "$([math]::Round($hoursSince, 1)) hours ago" }
+                              else { "$([math]::Round($hoursSince / 24, 1)) days ago" }
+
+                    Write-Host "`nBaseline available from $timeAgo" -ForegroundColor Cyan
+                    Write-Host "Tip: Use -Incremental for faster scan of changed objects only" -ForegroundColor Gray
+                }
+            }
+        }
 
         # Incremental scan setup
         $script:IncrementalMode = $false
@@ -182,6 +315,44 @@ function Invoke-ADScoutScan {
             $script:ADScoutCache.Timestamps.Clear()
         }
 
+        # Initialize audit log if enabled
+        $script:AuditLogEnabled = $EnableAuditLog
+        $script:AuditLog = @{
+            ExecutionId    = [guid]::NewGuid().ToString()
+            StartTime      = $startTime
+            Operator       = "$env:USERDOMAIN\$env:USERNAME"
+            TargetDomain   = $Domain
+            ScanProfile    = $ScanProfile
+            AlertProfile   = $AlertProfile
+            Parameters     = @{
+                Category       = $Category
+                RuleId         = $RuleId
+                ExcludeRuleId  = $ExcludeRuleId
+                IncludeEntraID = $IncludeEntraID.IsPresent
+                IncludeEndpointSecurity = $IncludeEndpointSecurity.IsPresent
+                Incremental    = $Incremental.IsPresent
+            }
+            RulesEvaluated = 0
+            FindingsCount  = 0
+            Events         = @()
+        }
+
+        if ($EnableAuditLog) {
+            Write-Verbose "Audit logging enabled. ExecutionId: $($script:AuditLog.ExecutionId)"
+        }
+
+        # Apply ScanProfile to AlertProfile if specified
+        if ($ScanProfile -and -not $AlertProfile) {
+            $AlertProfile = switch ($ScanProfile) {
+                'Stealth'       { @('Stealth') }
+                'Standard'      { @('Stealth', 'Moderate') }
+                'Comprehensive' { @('Stealth', 'Moderate', 'Noisy') }
+                'DCOnly'        { @('Stealth', 'Moderate', 'Noisy') }  # Filtered by category later
+                'EndpointAudit' { @('Noisy') }  # Endpoint rules are typically noisy
+            }
+            Write-Verbose "ScanProfile '$ScanProfile' mapped to AlertProfile: $($AlertProfile -join ', ')"
+        }
+
         # Get rules to execute
         $ruleParams = @{}
         if ($Category -and $Category -ne 'All') {
@@ -197,9 +368,42 @@ function Invoke-ADScoutScan {
             $rules = $rules | Where-Object { $_.Id -notin $ExcludeRuleId }
         }
 
+        # Apply AlertProfile filtering
+        if ($AlertProfile) {
+            $preFilterCount = $rules.Count
+            $rules = $rules | Where-Object {
+                $ruleAlertProfile = Get-RuleAlertProfile -Rule $_
+                $ruleAlertProfile -in $AlertProfile
+            }
+            $filteredCount = $preFilterCount - $rules.Count
+            if ($filteredCount -gt 0) {
+                Write-Verbose "Filtered $filteredCount rules based on AlertProfile ($($AlertProfile -join ', '))"
+                Write-Host "AlertProfile filter: Excluding $filteredCount rules outside of [$($AlertProfile -join ', ')] profiles" -ForegroundColor Yellow
+            }
+        }
+
+        # Apply ScanProfile-specific category filtering
+        if ($ScanProfile -eq 'DCOnly') {
+            $rules = $rules | Where-Object {
+                $_.Category -in @('PrivilegedAccess', 'Kerberos', 'Authentication', 'Infrastructure', 'DataProtection') -or
+                $_.DataSource -match 'DomainControllers'
+            }
+            Write-Verbose "DCOnly profile: Filtered to DC-relevant rules"
+        }
+        elseif ($ScanProfile -eq 'EndpointAudit') {
+            $rules = $rules | Where-Object { $_.Category -eq 'EndpointSecurity' -or $_.Id -like 'ES-*' -or $_.Id -like 'EDR-*' }
+            Write-Verbose "EndpointAudit profile: Filtered to endpoint rules"
+        }
+
         if (-not $rules) {
             Write-Warning "No rules found matching the specified criteria"
             return
+        }
+
+        # Display profile information
+        if ($ScanProfile -or $AlertProfile) {
+            $profileInfo = if ($ScanProfile) { "Profile: $ScanProfile" } else { "AlertProfile: $($AlertProfile -join ', ')" }
+            Write-Host "Scan configuration: $profileInfo | $($rules.Count) rules selected" -ForegroundColor Cyan
         }
 
         Write-Verbose "Found $($rules.Count) rules to execute"
@@ -302,10 +506,96 @@ function Invoke-ADScoutScan {
             $adData['EntraConnected'] = $false
         }
 
+        # Collect Endpoint Security data if requested or EndpointSecurity category is specified
+        $collectEndpoint = $IncludeEndpointSecurity -or ($Category -contains 'EndpointSecurity') -or ($Category -contains 'All')
+
+        if ($collectEndpoint) {
+            Write-Verbose "Collecting Endpoint Security data..."
+            $endpointParams = @{}
+            if ($TargetComputers) { $endpointParams['ComputerName'] = $TargetComputers }
+            if ($Credential) { $endpointParams['Credential'] = $Credential }
+
+            $adData['EndpointData'] = Get-ADScoutEndpointData @endpointParams
+            $adData['EndpointConnected'] = ($null -ne $adData['EndpointData'])
+            Write-Verbose "Endpoint Security data collection complete"
+        }
+        else {
+            $adData['EndpointConnected'] = $false
+        }
+
+        # Collect Email/Mailbox data if requested or Email category is specified
+        $collectEmail = $IncludeEmail -or ($Category -contains 'Email') -or ($Category -contains 'All')
+
+        if ($collectEmail) {
+            # Check if Exchange cmdlets are available
+            $exchangeAvailable = (Get-Command Get-Mailbox -ErrorAction SilentlyContinue) -or
+                                 (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue)
+
+            if ($exchangeAvailable) {
+                Write-Verbose "Collecting Email/Mailbox data..."
+                $mailboxParams = @{
+                    IncludeInboxRules = $true
+                    IncludePermissions = $true
+                }
+                if ($InternalDomains) { $mailboxParams['InternalDomains'] = $InternalDomains }
+
+                $mailboxData = Get-ADScoutMailboxData @mailboxParams
+
+                # Merge mailbox data into adData for rule consumption
+                $adData['Mailboxes'] = $mailboxData.Mailboxes
+                $adData['ForwardingRules'] = $mailboxData.ForwardingRules
+                $adData['InboxRules'] = $mailboxData.InboxRules
+                $adData['MailboxPermissions'] = $mailboxData.MailboxPermissions
+                $adData['SendAsPermissions'] = $mailboxData.SendAsPermissions
+                $adData['SendOnBehalfPermissions'] = $mailboxData.SendOnBehalfPermissions
+                $adData['TransportRules'] = $mailboxData.TransportRules
+                $adData['InternalDomains'] = $mailboxData.InternalDomains
+                $adData['EmailConnected'] = $true
+                Write-Verbose "Email/Mailbox data collection complete: $($mailboxData.Mailboxes.Count) mailboxes"
+            }
+            else {
+                Write-Verbose "Exchange cmdlets not available. Email rules will be skipped. Connect to Exchange first."
+                $adData['EmailConnected'] = $false
+            }
+        }
+        else {
+            $adData['EmailConnected'] = $false
+        }
+
         Write-Verbose "Data collection complete"
+
+        # Report data availability status
+        $dataAvailability = @{
+            'Active Directory' = $true
+            'Users'            = ($adData.Users -and $adData.Users.Count -gt 0)
+            'Computers'        = ($adData.Computers -and $adData.Computers.Count -gt 0)
+            'Groups'           = ($adData.Groups -and $adData.Groups.Count -gt 0)
+            'GPOs'             = ($adData.GPOs -and $adData.GPOs.Count -gt 0)
+            'Domain Controllers' = ($adData.DomainControllers -and $adData.DomainControllers.Count -gt 0)
+            'Entra ID'         = ($adData.EntraConnected -eq $true)
+            'Email/Exchange'   = ($adData.EmailConnected -eq $true)
+            'Endpoint Security' = ($adData.EndpointConnected -eq $true)
+        }
+
+        # Warn about unavailable data sources that might affect rule execution
+        $unavailableOptional = @()
+        if (-not $dataAvailability['Entra ID'] -and ($Category -contains 'EntraID' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Entra ID (run Connect-MgGraph first)'
+        }
+        if (-not $dataAvailability['Email/Exchange'] -and ($Category -contains 'Email' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Email/Exchange (connect to Exchange/EXO first)'
+        }
+        if (-not $dataAvailability['Endpoint Security'] -and ($Category -contains 'EndpointSecurity' -or $Category -contains 'All')) {
+            $unavailableOptional += 'Endpoint Security (use -IncludeEndpointSecurity with target computers)'
+        }
+
+        if ($unavailableOptional.Count -gt 0) {
+            Write-Warning "Some optional data sources unavailable - related rules will be skipped: $($unavailableOptional -join ', ')"
+        }
 
         # Execute rules
         $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $skippedRules = [System.Collections.Generic.List[string]]::new()
         $totalRules = $rules.Count
 
         Write-Verbose "Executing $totalRules rules"
@@ -402,6 +692,20 @@ function Invoke-ADScoutScan {
                 -Status 'Completed'
 
             Write-Verbose "Session saved to: $($script:CurrentSession.Path)"
+        }
+
+        # Save audit log if enabled
+        if ($script:AuditLogEnabled) {
+            $script:AuditLog.EndTime = $endTime
+            $script:AuditLog.Duration = $duration.TotalSeconds
+            $script:AuditLog.RulesEvaluated = $totalRules
+            $script:AuditLog.FindingsCount = $finalResults.Count
+            $script:AuditLog.TotalScore = ($finalResults | Measure-Object -Property Score -Sum).Sum
+
+            # Save audit manifest
+            Save-ADScoutAuditLog -AuditLog $script:AuditLog -SessionPath $script:CurrentSession.Path
+
+            Write-Host "`nAudit log saved. ExecutionId: $($script:AuditLog.ExecutionId)" -ForegroundColor Gray
         }
 
         # Return results

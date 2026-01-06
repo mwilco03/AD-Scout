@@ -84,6 +84,27 @@
         'ConvertFrom-ADScoutCSV'
         'ConvertTo-ADScoutCSV'
         'Test-ADScoutCSVEncoding'
+
+        # Quality-of-life / daily operations
+        'Test-ADScoutPrerequisites'
+        'Get-ADScoutAuditLog'
+        'Show-ADScoutAuditLog'
+        'Compare-ADScoutReport'
+        'Explain-ADScoutFinding'
+        'Get-ADScoutFindingSummary'
+        'Set-ADScoutEngagementConfig'
+        'Get-ADScoutEngagementConfig'
+        'Get-ADScoutEngagements'
+        'Add-ADScoutAcceptedRisk'
+        'Remove-ADScoutExcludedRule'
+        'Set-ADScoutCredential'
+        'Get-ADScoutCredential'
+        'Remove-ADScoutCredential'
+        'Get-ADScoutCredentialStatus'
+
+        # Export encryption
+        'Protect-ADScoutExport'
+        'Unprotect-ADScoutExport'
     )
 
     CmdletsToExport   = @()

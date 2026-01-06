@@ -87,7 +87,7 @@ $script:ADScoutCache = @{
 # Register argument completers
 Register-ArgumentCompleter -CommandName Invoke-ADScoutScan -ParameterName Category -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'All') |
+    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'PrivilegedAccess', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Email', 'Authentication', 'LateralMovement', 'DataProtection', 'AttackVectors', 'All') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
@@ -101,7 +101,7 @@ Register-ArgumentCompleter -CommandName Export-ADScoutReport -ParameterName Form
 
 Register-ArgumentCompleter -CommandName Get-ADScoutRule -ParameterName Category -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
-    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI') |
+    @('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'PrivilegedAccess', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Email', 'Authentication', 'LateralMovement', 'DataProtection', 'AttackVectors') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
@@ -156,6 +156,41 @@ Register-ArgumentCompleter -CommandName Connect-ADScoutEDR -ParameterName Provid
     @('PSFalcon', 'DefenderATP', 'MDE', 'CarbonBlack') |
         Where-Object { $_ -like "$wordToComplete*" } |
         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+}
+
+# ScanProfile argument completer
+Register-ArgumentCompleter -CommandName Invoke-ADScoutScan -ParameterName ScanProfile -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    @(
+        @{ Name = 'Stealth'; Desc = 'Low detection risk - LDAP queries only' }
+        @{ Name = 'Standard'; Desc = 'Balanced - Stealth + Moderate rules' }
+        @{ Name = 'Comprehensive'; Desc = 'Full scan - includes Noisy rules' }
+        @{ Name = 'DCOnly'; Desc = 'Domain Controller focused rules' }
+        @{ Name = 'EndpointAudit'; Desc = 'Endpoint security configuration' }
+    ) | Where-Object { $_.Name -like "$wordToComplete*" } |
+    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Desc) }
+}
+
+# AlertProfile argument completer
+Register-ArgumentCompleter -CommandName Invoke-ADScoutScan -ParameterName AlertProfile -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    @(
+        @{ Name = 'Stealth'; Desc = 'Read-only LDAP, minimal logging' }
+        @{ Name = 'Moderate'; Desc = 'ACL reads, GPO parsing, may trigger audit logs' }
+        @{ Name = 'Noisy'; Desc = 'PSRemoting, triggers EDR/security events' }
+    ) | Where-Object { $_.Name -like "$wordToComplete*" } |
+    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Desc) }
+}
+
+# EngagementId argument completer
+Register-ArgumentCompleter -CommandName @('Invoke-ADScoutScan', 'Get-ADScoutEngagementConfig', 'Set-ADScoutEngagementConfig') -ParameterName EngagementId -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    $engagementsPath = Join-Path $env:LOCALAPPDATA "ADScout\Engagements"
+    if (Test-Path $engagementsPath) {
+        Get-ChildItem -Path $engagementsPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$wordToComplete*" } |
+            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', "Engagement: $($_.Name)") }
+    }
 }
 
 # Initialize verbose message

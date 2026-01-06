@@ -25,7 +25,7 @@
     },
     "Category": {
       "type": "string",
-      "enum": ["Anomalies", "StaleObjects", "PrivilegedAccounts", "PrivilegedAccess", "Trusts", "Kerberos", "PKI", "GPO", "Email"],
+      "enum": ["Anomalies", "StaleObjects", "PrivilegedAccounts", "PrivilegedAccess", "Trusts", "Kerberos", "PKI", "GPO", "Email", "EndpointSecurity"],
       "description": "Rule category"
     },
     "Model": {

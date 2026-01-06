@@ -84,7 +84,20 @@ function Export-ADScoutReport {
         [switch]$SelfContained,
 
         [Parameter()]
-        [switch]$PassThru
+        [switch]$PassThru,
+
+        # Encryption parameters
+        [Parameter()]
+        [switch]$Encrypt,
+
+        [Parameter()]
+        [SecureString]$EncryptPassword,
+
+        [Parameter()]
+        [string]$EncryptCertificateThumbprint,
+
+        [Parameter()]
+        [switch]$DeleteUnencrypted
     )
 
     begin {
@@ -732,6 +745,45 @@ This assessment includes mappings to:
                 $mdContent | Out-File -FilePath $Path -Encoding UTF8
                 Write-Verbose "Markdown report saved to: $Path"
                 Write-Host "Markdown report saved to: $Path" -ForegroundColor Green
+            }
+        }
+
+        # Apply encryption if requested
+        if ($Encrypt -and $Path -and (Test-Path $Path)) {
+            Write-Verbose "Encrypting exported file..."
+
+            $encryptParams = @{
+                InputPath = $Path
+                DeleteOriginal = $DeleteUnencrypted.IsPresent
+            }
+
+            if ($EncryptPassword) {
+                $encryptParams.Password = $EncryptPassword
+            }
+            elseif ($EncryptCertificateThumbprint) {
+                $encryptParams.CertificateThumbprint = $EncryptCertificateThumbprint
+            }
+            else {
+                # Check if running interactively
+                $isInteractive = [Environment]::UserInteractive -and
+                                 -not ([Environment]::GetCommandLineArgs() -match '-NonInteractive')
+
+                if ($isInteractive -and $Host.Name -ne 'Default Host') {
+                    Write-Host "Encryption enabled. Enter password for encryption:" -ForegroundColor Yellow
+                    $encryptParams.Password = Read-Host -AsSecureString
+                } else {
+                    Write-Error "Encryption requested but no password provided. In non-interactive/automated mode, use -EncryptPassword or -EncryptCertificateThumbprint parameter."
+                    return
+                }
+            }
+
+            $encryptResult = Protect-ADScoutExport @encryptParams
+
+            if ($encryptResult) {
+                Write-Host "Report encrypted: $($encryptResult.EncryptedPath)" -ForegroundColor Green
+                if ($DeleteUnencrypted) {
+                    Write-Host "Original unencrypted file securely deleted." -ForegroundColor Gray
+                }
             }
         }
 

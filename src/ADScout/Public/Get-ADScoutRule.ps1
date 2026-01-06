@@ -50,7 +50,7 @@ function Get-ADScoutRule {
         [string[]]$Id,
 
         [Parameter()]
-        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'Authentication', 'Infrastructure', 'AttackVectors', 'ServiceAccounts', 'Persistence', 'EphemeralPersistence', 'Logging', 'LateralMovement', 'DataProtection', 'AzureAD')]
+        [ValidateSet('Anomalies', 'StaleObjects', 'PrivilegedAccounts', 'PrivilegedAccess', 'Trusts', 'Kerberos', 'GPO', 'PKI', 'EntraID', 'EndpointSecurity', 'Email', 'Authentication', 'Infrastructure', 'AttackVectors', 'ServiceAccounts', 'Persistence', 'EphemeralPersistence', 'Logging', 'LateralMovement', 'DataProtection', 'AzureAD')]
         [string[]]$Category,
 
         [Parameter()]
@@ -213,6 +213,12 @@ function Get-ADScoutRule {
                             DataSource    = $rule.DataSource
                             Severity      = $rule.Severity
                             SourceFile    = $file.FullName
+                        }
+
+                        # Validate rule interface
+                        $validationResult = Test-ADScoutRuleInterface -Rule $ruleObject
+                        if (-not $validationResult.Valid) {
+                            Write-Warning "Rule $($rule.Id) validation issue: $($validationResult.Message)"
                         }
 
                         $rules += $ruleObject
