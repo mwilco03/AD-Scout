@@ -4,9 +4,17 @@
 
 ## Overview
 
-AD-Scout supports remote Active Directory reconnaissance through EDR (Endpoint Detection and Response) platforms. This document catalogs EDR vendors by their API maturity, PowerShell library availability, and suitability for AD-Scout integration.
+AD-Scout supports remote Active Directory reconnaissance through EDR (Endpoint Detection and Response) platforms and native Windows remoting. This document catalogs providers by their maturity, PowerShell library availability, and suitability for AD-Scout integration.
 
 ## Provider Maturity Assessment
+
+### Tier 0: Native (No Agent Required)
+
+Direct PowerShell Remoting - the most straightforward approach when you have network access and credentials.
+
+| Provider | PowerShell Module | Documentation | Status |
+|----------|-------------------|---------------|--------|
+| PowerShell Remoting (WinRM) | Built-in | Excellent | ✅ Implemented |
 
 ### Tier 1: Production-Ready (Implemented)
 
@@ -37,6 +45,100 @@ These providers have APIs but lack mature PowerShell integration or have signifi
 | Trend Micro Vision One | REST API only | Moderate | Limited remote execution |
 | Cybereason | REST API only | Limited | Session-based complexity |
 | Elastic Security | REST API only | Good | Query-focused, limited execution |
+
+---
+
+## Tier 0 Provider (Native)
+
+### PowerShell Remoting (WinRM)
+
+**Module**: Built-in (no installation required)
+
+PowerShell Remoting is the native Windows remote execution capability. It's the most direct approach when you have network access and valid credentials - no EDR agent required.
+
+#### When to Use PSRemoting
+
+| Scenario | PSRemoting | EDR Provider |
+|----------|------------|--------------|
+| Direct network access to DCs | ✅ Best choice | Works |
+| No EDR agent deployed | ✅ Only option | ❌ Not available |
+| Air-gapped environments | ✅ Works | ❌ Usually not |
+| MSSP multi-tenant | ⚠️ Credential management | ✅ Safer |
+| Internet-only access | ❌ Rarely exposed | ✅ Designed for this |
+
+#### API Maturity Indicators
+- ✅ Built into Windows (no installation)
+- ✅ Comprehensive Microsoft documentation
+- ✅ Native PowerShell integration
+- ✅ Multiple authentication options
+- ✅ Supports all PowerShell capabilities
+- ✅ No agent required on targets
+
+#### Key Capabilities
+| Feature | Support Level | Notes |
+|---------|---------------|-------|
+| Remote PowerShell Execution | Full | Native `Invoke-Command` |
+| Host Discovery | Full | Via AD queries |
+| Domain Controller Detection | Full | AD + OU filtering |
+| Batch Operations | Full | ThrottleLimit parameter |
+| Authentication | Full | Kerberos, NTLM, CredSSP |
+| Session Persistence | Full | `New-PSSession` |
+
+#### Constraints & Limits
+```
+Max connections per host: 25 (configurable)
+Max shells per user: 5 (configurable)
+Max memory per shell: 150MB (default)
+Idle timeout: 2 hours (configurable)
+Operation timeout: 60 seconds (default)
+```
+
+#### Prerequisites
+```powershell
+# On target hosts (usually already enabled on servers):
+Enable-PSRemoting -Force
+
+# Firewall requirements:
+# - TCP 5985 (HTTP) or TCP 5986 (HTTPS)
+
+# For non-domain scenarios, may need:
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value "targethost"
+```
+
+#### Authentication Options
+
+| Method | Use Case | Security |
+|--------|----------|----------|
+| Kerberos | Domain environments | ✅ Most secure |
+| Negotiate | Auto-select best | ✅ Recommended |
+| NTLM | Non-domain/fallback | ⚠️ Acceptable |
+| CredSSP | Double-hop scenarios | ⚠️ Requires setup |
+| Basic | HTTPS only | ❌ Avoid if possible |
+
+#### Usage
+```powershell
+# Connect with current user (domain environment)
+Connect-ADScoutEDR -Provider PSRemoting
+
+# Connect with explicit credentials
+$cred = Get-Credential
+Connect-ADScoutEDR -Provider PSRemoting -Credential $cred
+
+# Connect with Kerberos to specific domain
+Connect-ADScoutEDR -Provider PSRemoting -Credential $cred `
+    -Domain 'contoso.com' -DomainController 'DC01.contoso.com'
+
+# Use SSL (port 5986)
+Connect-ADScoutEDR -Provider PSRemoting -Credential $cred -UseSSL
+
+# Execute reconnaissance
+Invoke-ADScoutEDRCommand -Template 'AD-FullRecon' -TargetHost 'DC01'
+```
+
+#### Documentation
+- WinRM Overview: https://docs.microsoft.com/en-us/windows/win32/winrm/portal
+- PowerShell Remoting: https://docs.microsoft.com/en-us/powershell/scripting/learn/remoting/running-remote-commands
+- Security Considerations: https://docs.microsoft.com/en-us/powershell/scripting/learn/remoting/winrmsecurity
 
 ---
 
@@ -298,15 +400,19 @@ Script execution: Queue-based
 
 ### Decision Matrix
 
-| Requirement | CrowdStrike | MDE | SentinelOne | Carbon Black |
-|-------------|-------------|-----|-------------|--------------|
-| High concurrency (100+ hosts) | ✅ Best | ⚠️ 25 limit | ✅ Good | ⚠️ Limited |
-| MSSP multi-tenant | ✅ Native | ✅ Azure | ✅ Multi-site | ⚠️ Complex |
-| PowerShell tooling | ✅ Official | ✅ Graph SDK | ⚠️ Community | ⚠️ Limited |
-| AD recon templates | ✅ Full | ✅ Full | 🔄 Planned | 🔄 Planned |
-| License cost | $$$ | $$$ (E5) | $$ | $$ |
+| Requirement | PSRemoting | CrowdStrike | MDE | SentinelOne | Carbon Black |
+|-------------|------------|-------------|-----|-------------|--------------|
+| No agent required | ✅ Native | ❌ Agent | ❌ Agent | ❌ Agent | ❌ Agent |
+| High concurrency (100+ hosts) | ✅ Good | ✅ Best | ⚠️ 25 limit | ✅ Good | ⚠️ Limited |
+| Network access required | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
+| MSSP multi-tenant | ⚠️ Creds | ✅ Native | ✅ Azure | ✅ Multi-site | ⚠️ Complex |
+| PowerShell tooling | ✅ Built-in | ✅ Official | ✅ Graph SDK | ⚠️ Community | ⚠️ Limited |
+| AD recon templates | ✅ Full | ✅ Full | ✅ Full | 🔄 Planned | 🔄 Planned |
+| License cost | Free | $$$ | $$$ (E5) | $$ | $$ |
 
 ### Recommendations
+
+**Direct network access available**: Use PSRemoting provider. No agent or license required, fastest setup.
 
 **Enterprise with CrowdStrike**: Use PSFalcon provider. Best concurrency and batch support.
 
@@ -314,7 +420,9 @@ Script execution: Queue-based
 
 **MSSP environments**: CrowdStrike PSFalcon with MemberCid for multi-tenant, or SentinelOne multi-site.
 
-**Mixed EDR environments**: AD-Scout supports multiple simultaneous connections. Use different session names per provider.
+**Air-gapped or no EDR**: Use PSRemoting provider. Only requirement is WinRM access.
+
+**Mixed environments**: AD-Scout supports multiple simultaneous connections. Use different session names per provider. Can combine PSRemoting + EDR providers.
 
 ---
 
@@ -364,6 +472,7 @@ See `PSFalconProvider.ps1` for a complete implementation example.
 ### Implemented Providers
 | Provider | Official Docs | PowerShell Module |
 |----------|---------------|-------------------|
+| PowerShell Remoting | [WinRM Docs](https://docs.microsoft.com/en-us/powershell/scripting/learn/remoting/running-remote-commands) | Built-in |
 | CrowdStrike Falcon | [API Docs](https://falcon.crowdstrike.com/documentation) | [PSFalcon](https://github.com/CrowdStrike/psfalcon) |
 | Microsoft Defender | [MDE API](https://learn.microsoft.com/en-us/microsoft-365/security/defender-endpoint/api-reference) | [MS Graph](https://learn.microsoft.com/en-us/powershell/microsoftgraph/) |
 
@@ -382,3 +491,4 @@ See `PSFalconProvider.ps1` for a complete implementation example.
 |------|--------|
 | 2024-01 | Initial documentation with Tier 1-3 assessment |
 | 2024-01 | Added PSFalcon and DefenderATP implementation details |
+| 2024-01 | Added Tier 0 PSRemoting provider (native WinRM support) |

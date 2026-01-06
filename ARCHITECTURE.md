@@ -815,6 +815,9 @@ AD-Scout supports remote AD reconnaissance through EDR platforms when direct dom
 │                                                                  │
 │   EDRProviderBase (Abstract)                                    │
 │         │                                                        │
+│         ├── PSRemotingProvider (Native WinRM)                   │
+│         │     └── Built-in, no agent required                   │
+│         │                                                        │
 │         ├── PSFalconProvider (CrowdStrike)                      │
 │         │     └── PSFalcon module, RTR API                      │
 │         │                                                        │
@@ -830,6 +833,7 @@ AD-Scout supports remote AD reconnaissance through EDR platforms when direct dom
 
 | Tier | Status | Providers |
 |------|--------|-----------|
+| Tier 0 | Native, no agent required | PowerShell Remoting (WinRM) |
 | Tier 1 | Production-ready, implemented | CrowdStrike Falcon, Microsoft Defender |
 | Tier 2 | Integration candidate | SentinelOne, Carbon Black, Cortex XDR |
 | Tier 3 | Limited API support | Sophos, Trend Micro, Cybereason |
@@ -842,7 +846,8 @@ See [docs/EDR_PROVIDERS.md](docs/EDR_PROVIDERS.md) for detailed API documentatio
 Private/EDR/
 ├── EDRProviderBase.ps1       # Abstract base class, security controls
 ├── Providers/
-│   ├── PSFalconProvider.ps1  # CrowdStrike implementation
+│   ├── PSRemotingProvider.ps1  # Native WinRM (no agent required)
+│   ├── PSFalconProvider.ps1    # CrowdStrike implementation
 │   └── DefenderATPProvider.ps1 # Microsoft MDE implementation
 └── Commands/
     └── ADScoutEDRTemplates.ps1 # Pre-canned reconnaissance templates
