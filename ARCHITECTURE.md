@@ -802,6 +802,83 @@ Results → Transform to target schema → Batch → Send via API
             └── Custom (Log Analytics)
 ```
 
+## EDR Integration
+
+AD-Scout supports remote AD reconnaissance through EDR platforms when direct domain controller access is unavailable.
+
+### Provider Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    EDR Provider Abstraction                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   EDRProviderBase (Abstract)                                    │
+│         │                                                        │
+│         ├── PSFalconProvider (CrowdStrike)                      │
+│         │     └── PSFalcon module, RTR API                      │
+│         │                                                        │
+│         ├── DefenderATPProvider (Microsoft MDE)                 │
+│         │     └── Graph API, Live Response                      │
+│         │                                                        │
+│         └── [Future: SentinelOne, Carbon Black, etc.]           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Provider Maturity Tiers
+
+| Tier | Status | Providers |
+|------|--------|-----------|
+| Tier 1 | Production-ready, implemented | CrowdStrike Falcon, Microsoft Defender |
+| Tier 2 | Integration candidate | SentinelOne, Carbon Black, Cortex XDR |
+| Tier 3 | Limited API support | Sophos, Trend Micro, Cybereason |
+
+See [docs/EDR_PROVIDERS.md](docs/EDR_PROVIDERS.md) for detailed API documentation and maturity assessment.
+
+### Key Components
+
+```
+Private/EDR/
+├── EDRProviderBase.ps1       # Abstract base class, security controls
+├── Providers/
+│   ├── PSFalconProvider.ps1  # CrowdStrike implementation
+│   └── DefenderATPProvider.ps1 # Microsoft MDE implementation
+└── Commands/
+    └── ADScoutEDRTemplates.ps1 # Pre-canned reconnaissance templates
+```
+
+### Security Model
+
+The EDR integration enforces a conditional read-only model for MSSP safety:
+
+| Session Count | Access Level | Allowed Operations |
+|---------------|--------------|-------------------|
+| Single (1) | Full access | ScriptBlock, Command, Template |
+| Multiple (2+) | Read-only | Template only (pre-validated) |
+
+### Multi-Session Management
+
+```powershell
+# Single session - full access
+Connect-ADScoutEDR -Provider PSFalcon -ClientId $id -ClientSecret $secret
+Invoke-ADScoutEDRCommand -ScriptBlock { Get-ADUser -Filter * }
+
+# Multi-tenant MSSP - locked to templates only
+Connect-ADScoutEDR -Provider PSFalcon -Name 'ClientA' ...
+Connect-ADScoutEDR -Provider PSFalcon -Name 'ClientB' ...  # Now in safe mode
+Invoke-ADScoutEDRCommand -Template 'AD-FullRecon' -Session 'ClientA'
+```
+
+### Rate Limit Handling
+
+| Provider | Concurrent Sessions | Requests/Min | Batch Size |
+|----------|---------------------|--------------|------------|
+| CrowdStrike | 500 | 6,000 | 10,000 hosts |
+| Microsoft MDE | 25 (hard limit) | 100 | N/A |
+
+Auto-batching via `Invoke-ADScoutEDRCollection` respects provider-specific limits.
+
 ## Engagement Management
 
 Engagements provide persistent assessment contexts:

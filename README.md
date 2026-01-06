@@ -59,6 +59,7 @@ See [examples/Remote-Execution.ps1](examples/Remote-Execution.ps1) for advanced 
 
 - **PowerShell-first**: Native module experience with tab-completion, pipeline support, and Show-Command integration
 - **Remote execution**: Run directly via `iwr | iex` without installation—ideal for IR and assessments
+- **EDR integration**: Execute AD reconnaissance through CrowdStrike Falcon or Microsoft Defender for Endpoint
 - **Community-extensible**: Drop-in rule files with no compilation required
 - **Cross-version compatible**: Works on PowerShell 5.1 and 7.x (Desktop and Core editions)
 - **Output-flexible**: Pluggable reporters (HTML, JSON, CSV, SARIF, Console, and more)
@@ -73,6 +74,7 @@ See [examples/Remote-Execution.ps1](examples/Remote-Execution.ps1) for advanced 
 | Language | PowerShell | C# | C#/JS | PowerShell |
 | Extensibility | Drop-in rules | Requires rebuild | Custom queries | Script modification |
 | Output Formats | Pluggable | HTML/XML | Neo4j | Multiple |
+| EDR Integration | CrowdStrike, MDE | No | No | No |
 | Attack Paths | Planned | Limited | Extensive | None |
 | MITRE Mapping | Yes | Partial | No | No |
 | License | MIT | Proprietary/GPL | GPL | MIT |
@@ -98,6 +100,7 @@ See [examples/Remote-Execution.ps1](examples/Remote-Execution.ps1) for advanced 
 
 - [Design Document](DESIGN_DOCUMENT.md) - Vision and philosophy
 - [Architecture](ARCHITECTURE.md) - Implementation guide
+- [EDR Providers](docs/EDR_PROVIDERS.md) - EDR platform integration and API maturity
 - [Contributing](CONTRIBUTING.md) - How to contribute
 - [Acknowledgments](ACKNOWLEDGMENTS.md) - Credits to prior art
 
