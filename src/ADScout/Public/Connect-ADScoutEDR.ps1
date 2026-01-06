@@ -15,6 +15,7 @@ function Connect-ADScoutEDR {
 
     .PARAMETER Provider
         The EDR provider to connect to. Supported values:
+        - PSRemoting: Native PowerShell Remoting (WinRM) - no agent required
         - PSFalcon: CrowdStrike Falcon (requires PSFalcon module)
         - DefenderATP/MDE: Microsoft Defender for Endpoint
         - CarbonBlack: VMware Carbon Black (requires Carbon Black module)
@@ -84,6 +85,22 @@ function Connect-ADScoutEDR {
 
         Connects using a credential object (username = ClientId, password = ClientSecret).
 
+    .EXAMPLE
+        Connect-ADScoutEDR -Provider PSRemoting
+
+        Connects using native PowerShell Remoting with current user credentials.
+
+    .EXAMPLE
+        $cred = Get-Credential
+        Connect-ADScoutEDR -Provider PSRemoting -Credential $cred -Domain 'contoso.com'
+
+        Connects using PSRemoting with explicit credentials for a specific domain.
+
+    .EXAMPLE
+        Connect-ADScoutEDR -Provider PSRemoting -Credential $cred -UseSSL -Authentication Kerberos
+
+        Connects using PSRemoting over HTTPS with Kerberos authentication.
+
     .PARAMETER PassThru
         Returns the connection object instead of boolean. Enables pipeline scenarios:
         Connect-ADScoutEDR ... -PassThru | Invoke-ADScoutEDRCommand -Template 'AD-DomainInfo'
@@ -93,9 +110,11 @@ function Connect-ADScoutEDR {
 
     .NOTES
         Prerequisites vary by provider:
+        - PSRemoting: WinRM enabled on targets (Enable-PSRemoting), network access
         - PSFalcon: Install-Module PSFalcon
         - DefenderATP: Azure AD app with MDE API permissions
-        - Both require appropriate API scopes for remote execution
+
+        PSRemoting is the simplest option when you have network access - no agent required.
 
     .LINK
         https://github.com/CrowdStrike/psfalcon
@@ -105,7 +124,7 @@ function Connect-ADScoutEDR {
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('PSFalcon', 'DefenderATP', 'MDE', 'CarbonBlack')]
+        [ValidateSet('PSRemoting', 'PSFalcon', 'DefenderATP', 'MDE', 'CarbonBlack')]
         [string]$Provider,
 
         [Parameter()]
@@ -140,7 +159,21 @@ function Connect-ADScoutEDR {
         [bool]$SetActive = $true,
 
         [Parameter()]
-        [switch]$PassThru
+        [switch]$PassThru,
+
+        # PSRemoting-specific parameters
+        [Parameter()]
+        [string]$Domain,
+
+        [Parameter()]
+        [string]$DomainController,
+
+        [Parameter()]
+        [switch]$UseSSL,
+
+        [Parameter()]
+        [ValidateSet('Default', 'Basic', 'Negotiate', 'Kerberos', 'NegotiateWithImplicitCredential', 'Credssp', 'Ntlm')]
+        [string]$Authentication = 'Default'
     )
 
     # Initialize session registry if needed
@@ -185,6 +218,7 @@ function Connect-ADScoutEDR {
 
     # Create a new provider instance for this session
     $providerInstance = switch ($Provider) {
+        'PSRemoting' { [PSRemotingProvider]::new() }
         'PSFalcon' { [PSFalconProvider]::new() }
         'DefenderATP' { [DefenderATPProvider]::new() }
         default { $providerTemplate }
@@ -211,6 +245,18 @@ function Connect-ADScoutEDR {
 
     # Add provider-specific parameters
     switch ($Provider) {
+        'PSRemoting' {
+            # PSRemoting uses Credential directly (not split into ClientId/Secret)
+            if ($Credential) {
+                $connectionParams.Credential = $Credential
+                $connectionParams.Remove('ClientId')
+                $connectionParams.Remove('ClientSecret')
+            }
+            if ($Domain) { $connectionParams.Domain = $Domain }
+            if ($DomainController) { $connectionParams.DomainController = $DomainController }
+            if ($UseSSL) { $connectionParams.UseSSL = $true }
+            if ($Authentication -ne 'Default') { $connectionParams.Authentication = $Authentication }
+        }
         'PSFalcon' {
             $connectionParams.Cloud = $Cloud
             if ($MemberCid) { $connectionParams.MemberCid = $MemberCid }
