@@ -764,9 +764,17 @@ This assessment includes mappings to:
                 $encryptParams.CertificateThumbprint = $EncryptCertificateThumbprint
             }
             else {
-                # Prompt for password if neither provided
-                Write-Host "Encryption enabled. Enter password for encryption:" -ForegroundColor Yellow
-                $encryptParams.Password = Read-Host -AsSecureString
+                # Check if running interactively
+                $isInteractive = [Environment]::UserInteractive -and
+                                 -not ([Environment]::GetCommandLineArgs() -match '-NonInteractive')
+
+                if ($isInteractive -and $Host.Name -ne 'Default Host') {
+                    Write-Host "Encryption enabled. Enter password for encryption:" -ForegroundColor Yellow
+                    $encryptParams.Password = Read-Host -AsSecureString
+                } else {
+                    Write-Error "Encryption requested but no password provided. In non-interactive/automated mode, use -EncryptPassword or -EncryptCertificateThumbprint parameter."
+                    return
+                }
             }
 
             $encryptResult = Protect-ADScoutExport @encryptParams

@@ -91,6 +91,12 @@ function Invoke-ADScoutScan {
         [string]$Domain,
 
         [Parameter()]
+        [string[]]$Domains,
+
+        [Parameter()]
+        [switch]$Forest,
+
+        [Parameter()]
         [string]$Server,
 
         [Parameter()]
@@ -154,10 +160,113 @@ function Invoke-ADScoutScan {
         Write-Verbose "Starting AD-Scout scan"
         $startTime = Get-Date
 
+        # Handle forest-wide or multi-domain scans
+        if ($Forest -or $Domains) {
+            $targetDomains = @()
+
+            if ($Forest) {
+                try {
+                    $forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()
+                    $targetDomains = $forest.Domains | ForEach-Object { $_.Name }
+                    Write-Host "Forest scan: Found $($targetDomains.Count) domains" -ForegroundColor Cyan
+                    $targetDomains | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
+                }
+                catch {
+                    Write-Error "Failed to enumerate forest domains: $_"
+                    return
+                }
+            }
+            elseif ($Domains) {
+                $targetDomains = $Domains
+            }
+
+            if ($targetDomains.Count -gt 1) {
+                Write-Host "`nScanning $($targetDomains.Count) domains..." -ForegroundColor Cyan
+
+                $allResults = @()
+                $domainCount = 0
+
+                foreach ($targetDomain in $targetDomains) {
+                    $domainCount++
+                    Write-Host "`n[$domainCount/$($targetDomains.Count)] Scanning: $targetDomain" -ForegroundColor Yellow
+
+                    # Recursive call for each domain
+                    $domainResults = Invoke-ADScoutScan -Domain $targetDomain -Credential $Credential `
+                        -Category $Category -ScanProfile $ScanProfile -AlertProfile $AlertProfile `
+                        -RuleId $RuleId -ExcludeRuleId $ExcludeRuleId `
+                        -IncludeEntraID:$IncludeEntraID -IncludeEndpointSecurity:$IncludeEndpointSecurity `
+                        -EnableAuditLog:$EnableAuditLog
+
+                    # Tag results with domain
+                    $domainResults | ForEach-Object {
+                        $_ | Add-Member -NotePropertyName 'SourceDomain' -NotePropertyValue $targetDomain -Force
+                    }
+
+                    $allResults += $domainResults
+                }
+
+                Write-Host "`nForest scan complete: $($allResults.Count) findings across $($targetDomains.Count) domains" -ForegroundColor Cyan
+
+                return $allResults
+            }
+            elseif ($targetDomains.Count -eq 1) {
+                $Domain = $targetDomains[0]
+            }
+        }
+
         # Initialize session for disk persistence
         $sessionParams = @{}
         if ($EngagementId) { $sessionParams.EngagementId = $EngagementId }
         $script:CurrentSession = Get-ADScoutSessionPath @sessionParams
+
+        # Load engagement config if available
+        if ($EngagementId) {
+            $engagementConfig = Get-ADScoutEngagementConfig -EngagementId $EngagementId -ErrorAction SilentlyContinue
+            if ($engagementConfig) {
+                Write-Verbose "Loaded engagement config for: $EngagementId"
+
+                # Apply config defaults if not explicitly provided
+                if (-not $Domain -and $engagementConfig.DefaultDomain) {
+                    $Domain = $engagementConfig.DefaultDomain
+                    Write-Verbose "Using engagement default domain: $Domain"
+                }
+
+                if (-not $ScanProfile -and $engagementConfig.DefaultScanProfile) {
+                    $ScanProfile = $engagementConfig.DefaultScanProfile
+                    Write-Verbose "Using engagement default scan profile: $ScanProfile"
+                }
+
+                if (-not $ExcludeRuleId -and $engagementConfig.ExcludeRules) {
+                    $ExcludeRuleId = $engagementConfig.ExcludeRules
+                    Write-Host "Engagement config: Excluding $($ExcludeRuleId.Count) rules" -ForegroundColor Gray
+                }
+
+                if ($engagementConfig.DefaultCategories -and $Category -eq 'All') {
+                    $Category = $engagementConfig.DefaultCategories
+                }
+            }
+        }
+
+        # Auto-suggest incremental scan if baseline exists
+        if (-not $Incremental -and -not $BaselinePath) {
+            $latestSession = if ($EngagementId) {
+                Get-ADScoutLatestSession -EngagementId $EngagementId -ErrorAction SilentlyContinue
+            } else {
+                Get-ADScoutLatestSession -ErrorAction SilentlyContinue
+            }
+
+            if ($latestSession -and $latestSession.ScanTime) {
+                $hoursSince = ((Get-Date) - $latestSession.ScanTime).TotalHours
+                if ($hoursSince -lt 168) {  # Within 1 week
+                    $timeAgo = if ($hoursSince -lt 1) { "$([math]::Round($hoursSince * 60)) minutes ago" }
+                              elseif ($hoursSince -lt 24) { "$([math]::Round($hoursSince, 1)) hours ago" }
+                              else { "$([math]::Round($hoursSince / 24, 1)) days ago" }
+
+                    Write-Host "`nBaseline available from $timeAgo" -ForegroundColor Cyan
+                    Write-Host "Tip: Use -Incremental for faster scan of changed objects only" -ForegroundColor Gray
+                }
+            }
+        }
 
         # Incremental scan setup
         $script:IncrementalMode = $false
